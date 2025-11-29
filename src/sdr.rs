@@ -10,11 +10,10 @@ use serde_yaml::from_reader;
 
 use crossbeam::channel::{Receiver, Sender, bounded};
 use lockfree_object_pool::LinearOwnedReusable;
-use sdaa_ctrl::ctrl_msg::{CmdReplySummary, CtrlMsg, send_cmd};
+
 
 use crate::{
-    payload::Payload,
-    pipeline::{RecvCmd, recv_pkt},
+    ctrl_msg::{CmdReplySummary, CtrlMsg, send_cmd}, payload::Payload, pipeline::{RecvCmd, recv_pkt}
 };
 
 pub struct SdrCtrl {
@@ -38,7 +37,7 @@ impl SdrCtrl {
         self.send_cmd(cmd)
     }
 
-    pub fn init_device<P: AsRef<Path>>(&self, file_path: P) {
+    pub fn init_device<P: std::fmt::Debug + AsRef<Path>>(&self, file_path: P) {
         let cmds: Vec<CtrlMsg> =
             from_reader(File::open(file_path).expect("file not open")).expect("failed to load cmd");
         for cmd in cmds {
@@ -49,8 +48,17 @@ impl SdrCtrl {
     }
 
     pub fn set_mixer_freq(&self, freq_mega_hz: f64, sync: u32) -> CmdReplySummary {
-        let cmd = CtrlMsg::MixerSet { msg_id: 0, freq: -freq_mega_hz, phase: 0.0, sync: sync } ;
-        self.send_cmd(cmd)
+        if freq_mega_hz > -2000.0 && freq_mega_hz < 2000.0 {
+            let cmd = CtrlMsg::MixerSet {
+                msg_id: 0,
+                freq: -freq_mega_hz,
+                phase: 0.0,
+                sync: sync,
+            };
+            self.send_cmd(cmd)
+        }else{
+            panic!()
+        }
     }
 
     pub fn stream_start(&self) -> CmdReplySummary {
@@ -83,7 +91,7 @@ impl Drop for Sdr {
 
 impl Sdr {
     #[allow(clippy::type_complexity)]
-    pub fn new<P: AsRef<Path>>(
+    pub fn new<P: std::fmt::Debug+AsRef<Path>>(
         remote_ctrl_addr: SocketAddrV4,
         local_ctrl_addr: SocketAddrV4,
         local_payload_addr: SocketAddrV4,
@@ -94,6 +102,7 @@ impl Sdr {
             local_ctrl_addr,
         };
 
+        println!("init file: {init_file:?}");
         ctrl.init_device(init_file);
 
         let payload_socket =

@@ -14,6 +14,8 @@ rand_distr = "0.5.1"
 rayon = "1.11.0"
 rustfft = "6.4.0"
 serde_yaml = "0.9.34+deprecated"
+binrw = "0.15.0"
+
 
 [dependencies.serde]
 features = ["derive"]
@@ -23,9 +25,6 @@ version = "1.0.219"
 [dependencies.clap]
 features = ["derive"]
 version = "4.5.45"
-
-[dependencies.sdaa_ctrl]
-path = "../sdaa_ctrl"
 
 
 [lib]
