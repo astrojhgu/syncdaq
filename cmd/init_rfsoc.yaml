@@ -84,3 +84,10 @@
     src_ip:  [10,100,11,27]
     dst_port: 4007
     src_port: 3001
+- !MixerSet
+  msg_id: 0
+  freq: -360
+  phase: 0
+  sync: 1
+  
+  

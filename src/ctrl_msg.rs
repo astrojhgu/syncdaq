@@ -84,6 +84,16 @@ pub enum Health {
     T510Health{
         rfdc_restart_cnt: u32,
         temperature: i32,
+        nports: u32,     
+        z:u32,   
+        #[br(count=nports)]
+        pkt_cnt1: Vec<u64>,
+        #[br(count=nports)]
+        axi_frame_cnt1: Vec<u64>,
+        #[br(count=nports)]
+        pkt_cnt2: Vec<u64>,
+        #[br(count=nports)]
+        axi_frame_cnt2: Vec<u64>,
     }
 }
 
@@ -239,8 +249,16 @@ pub enum CtrlMsg {
     #[brw(magic(0xff_00_00_0d_u32))]
     MixerSetReply{
         msg_id: u32,
+    },
+    #[brw(magic(0x00_00_00_0e_u32))]
+    PortMask{
+        msg_id: u32, 
+        mask: u32,
+    },
+    #[brw(magic(0xff_00_00_0e_u32))]
+    PortMaskReply{
+        msg_id: u32, 
     }
-
 }
 
 impl Display for CtrlMsg {
@@ -473,6 +491,12 @@ impl Display for CtrlMsg {
             }
             CtrlMsg::MixerSetReply { msg_id }=>{
                 writeln!(f, "MixerSetReply {{msg_id: {msg_id}}}")
+            },
+            CtrlMsg::PortMask { msg_id, mask }=>{
+                writeln!(f, "PortMask {{msg_id:{msg_id}, mask:{mask:x}}}")
+            }
+            CtrlMsg::PortMaskReply { msg_id }=>{
+                writeln!(f, "PortMaskReply{{msg_id:{msg_id}}}")
             }
         }?;
         writeln!(f, "=====================")
@@ -518,6 +542,8 @@ impl CtrlMsg {
             SetClkReply{ msg_id, .. }=>*msg_id=mid,
             MixerSet{ msg_id, .. }=>*msg_id=mid,
             MixerSetReply{ msg_id }=>*msg_id=mid,
+            PortMask{msg_id,..}=>*msg_id=mid,
+            PortMaskReply{msg_id}=>*msg_id=mid,
         }
     }
 
@@ -563,6 +589,8 @@ impl CtrlMsg {
             SetClkReply{ msg_id, .. }=>*msg_id,
             MixerSet{ msg_id, .. }=>*msg_id,
             MixerSetReply{ msg_id }=>*msg_id,
+            PortMask{msg_id,..}=>*msg_id,
+            PortMaskReply{msg_id}=>*msg_id,
         }
     }
 }
