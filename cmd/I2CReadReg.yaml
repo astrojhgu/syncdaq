@@ -1,0 +1,5 @@
+- !I2CReadReg
+  msg_id: 0
+  dev_addr: 0x1c
+  reg_addr: 0x08
+  nbytes: 4

@@ -1,0 +1,40 @@
+- !XGbeCfgSingle
+  msg_id: 287454020
+  port_id: 0
+  cfg:
+    dst_mac: [0x10,0x70,0xfd,0xb3,0x68,0xde]
+    src_mac: [0x10,0x70,0xfd,0xb3,0x60,0xef]
+    dst_ip:  [10,100,11,1]
+    src_ip:  [10,100,11,20]
+    dst_port: 4000
+    src_port: 3001
+- !XGbeCfgSingle
+  msg_id: 287454020
+  port_id: 1
+  cfg:
+    dst_mac: [0x10,0x70,0xfd,0xb3,0x68,0xde]
+    src_mac: [0x10,0x70,0xfd,0xb3,0x61,0xef]
+    dst_ip:  [10,100,11,1]
+    src_ip:  [10,100,11,21]
+    dst_port: 4001
+    src_port: 3001
+- !XGbeCfgSingle
+  msg_id: 287454020
+  port_id: 2
+  cfg:
+    dst_mac: [0x10,0x70,0xfd,0xb3,0x68,0xde]
+    src_mac: [0x10,0x70,0xfd,0xb3,0x62,0xef]
+    dst_ip:  [10,100,11,1]
+    src_ip:  [10,100,11,22]
+    dst_port: 4002
+    src_port: 3001
+- !XGbeCfgSingle
+  msg_id: 287454020
+  port_id: 3
+  cfg:
+    dst_mac: [0x10,0x70,0xfd,0xb3,0x68,0xde]
+    src_mac: [0x10,0x70,0xfd,0xb3,0x63,0xef]
+    dst_ip:  [10,100,11,1]
+    src_ip:  [10,100,11,23]
+    dst_port: 4003
+    src_port: 3001

@@ -1,0 +1,4 @@
+- !BitShift
+  msg_id: 0
+  shift_bits: 8
+  

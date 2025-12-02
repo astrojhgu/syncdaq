@@ -1,0 +1,86 @@
+- !SetClk
+  msg_id: 0
+  clk_src: 2
+  pps_src: 1
+- !Sync
+  msg_id: 0
+- !XGbeCfgSingle
+  msg_id: 287454020
+  port_id: 0
+  cfg:
+    dst_mac: [0x10,0x70,0xfd,0xb3,0x68,0xde]
+    src_mac: [0x10,0x70,0xfd,0xb3,0x60,0xef]
+    dst_ip:  [10,100,11,1]
+    src_ip:  [10,100,11,20]
+    dst_port: 4000
+    src_port: 3001
+- !XGbeCfgSingle
+  msg_id: 287454020
+  port_id: 1
+  cfg:
+    dst_mac: [0x10,0x70,0xfd,0xb3,0x68,0xde]
+    src_mac: [0x10,0x70,0xfd,0xb3,0x61,0xef]
+    dst_ip:  [10,100,11,1]
+    src_ip:  [10,100,11,21]
+    dst_port: 4001
+    src_port: 3001
+- !XGbeCfgSingle
+  msg_id: 287454020
+  port_id: 2
+  cfg:
+    dst_mac: [0x10,0x70,0xfd,0xb3,0x68,0xde]
+    src_mac: [0x10,0x70,0xfd,0xb3,0x62,0xef]
+    dst_ip:  [10,100,11,1]
+    src_ip:  [10,100,11,22]
+    dst_port: 4002
+    src_port: 3001
+- !XGbeCfgSingle
+  msg_id: 287454020
+  port_id: 3
+  cfg:
+    dst_mac: [0x10,0x70,0xfd,0xb3,0x68,0xde]
+    src_mac: [0x10,0x70,0xfd,0xb3,0x63,0xef]
+    dst_ip:  [10,100,11,1]
+    src_ip:  [10,100,11,23]
+    dst_port: 4003
+    src_port: 3001
+- !XGbeCfgSingle
+  msg_id: 287454020
+  port_id: 4
+  cfg:
+    dst_mac: [0x10,0x70,0xfd,0xb3,0x68,0xde]
+    src_mac: [0x10,0x70,0xfd,0xb3,0x64,0xef]
+    dst_ip:  [10,100,11,1]
+    src_ip:  [10,100,11,24]
+    dst_port: 4004
+    src_port: 3001
+- !XGbeCfgSingle
+  msg_id: 287454020
+  port_id: 5
+  cfg:
+    dst_mac: [0x10,0x70,0xfd,0xb3,0x68,0xde]
+    src_mac: [0x10,0x70,0xfd,0xb3,0x65,0xef]
+    dst_ip:  [10,100,11,1]
+    src_ip:  [10,100,11,25]
+    dst_port: 4005
+    src_port: 3001
+- !XGbeCfgSingle
+  msg_id: 287454020
+  port_id: 6
+  cfg:
+    dst_mac: [0x10,0x70,0xfd,0xb3,0x68,0xde]
+    src_mac: [0x10,0x70,0xfd,0xb3,0x66,0xef]
+    dst_ip:  [10,100,11,1]
+    src_ip:  [10,100,11,26]
+    dst_port: 4006
+    src_port: 3001
+- !XGbeCfgSingle
+  msg_id: 287454020
+  port_id: 7
+  cfg:
+    dst_mac: [0x10,0x70,0xfd,0xb3,0x68,0xde]
+    src_mac: [0x10,0x70,0xfd,0xb3,0x67,0xef]
+    dst_ip:  [10,100,11,1]
+    src_ip:  [10,100,11,27]
+    dst_port: 4007
+    src_port: 3001

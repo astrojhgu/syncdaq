@@ -1,0 +1,5 @@
+- !SetClk
+  msg_id: 0
+  clk_src: 1
+  pps_src: 0
+  

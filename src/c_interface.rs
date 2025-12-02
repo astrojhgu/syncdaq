@@ -1,18 +1,45 @@
 #![allow(static_mut_refs)]
 
-use std::{net::{Ipv4Addr, SocketAddr, SocketAddrV4}, slice::from_raw_parts_mut, time::Duration};
+use std::{
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    simd::{Simd, num::SimdInt},
+    slice::{from_raw_parts, from_raw_parts_mut},
+    time::Duration,
+};
 
+fn convert_simd(src: &[i16], dst: &mut [f32]) {
+    assert!(src.len() == dst.len());
+    const CHK_LEN: usize = 64;
+
+    //type Vf32 = Simd<f32, CHK_LEN>;
+    type Vi16 = Simd<i16, CHK_LEN>;
+
+    let chunks = src.len() / CHK_LEN;
+
+    for i in 0..chunks {
+        let vi = Vi16::from_slice(&src[i * CHK_LEN..]);
+        let vf = vi.cast::<f32>();
+        vf.copy_to_slice(&mut dst[i * CHK_LEN..]);
+    }
+
+    // 处理尾部
+    for i in (chunks * CHK_LEN)..src.len() {
+        dst[i] = src[i] as f32;
+    }
+}
 
 use crossbeam::channel::{Receiver, Sender};
 use lockfree_object_pool::LinearOwnedReusable;
 use num::Complex;
 
 use crate::{
-    ctrl_msg::{CtrlMsg, bcast_cmd, send_cmd}, payload::{N_PT_PER_FRAME, Payload}, pipeline::RecvCmd, sdr::Sdr
+    ctrl_msg::{CtrlMsg, bcast_cmd, send_cmd},
+    payload::{N_PT_PER_FRAME, Payload},
+    pipeline::RecvCmd,
+    sdr::Sdr,
 };
 
 //use sdaa_ctrl::ctrl_msg::{CtrlMsg, bcast_cmd, send_cmd};
-
 
 pub struct CSdr {
     sdr_dev: Sdr,
@@ -29,6 +56,12 @@ pub struct CComplex {
     pub im: i16,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct CComplexF32 {
+    pub re: f32,
+    pub im: f32,
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn new_sdr_device(
@@ -36,18 +69,20 @@ pub extern "C" fn new_sdr_device(
     local_ctrl_port: u16,
     local_payload_ip: u32,
     local_payload_port: u16,
-    cfg_file: *const std::ffi::c_char
+    cfg_file: *const std::ffi::c_char,
 ) -> *mut CSdr {
-    let c_str= unsafe { std::ffi::CStr::from_ptr(cfg_file) };
+    let c_str = unsafe { std::ffi::CStr::from_ptr(cfg_file) };
     let remote_ctrl_addr = SocketAddrV4::new(Ipv4Addr::from(remote_ctrl_ip), 3000);
     let local_ctrl_addr = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), local_ctrl_port);
     let local_payload_addr =
         SocketAddrV4::new(Ipv4Addr::from(local_payload_ip), local_payload_port);
 
-    let (sdr_dev, rx_payload, tx_cmd) =
-        Sdr::new(remote_ctrl_addr, local_ctrl_addr, local_payload_addr, c_str.to_str().unwrap());
-
-    
+    let (sdr_dev, rx_payload, tx_cmd) = Sdr::new(
+        remote_ctrl_addr,
+        local_ctrl_addr,
+        local_payload_addr,
+        c_str.to_str().unwrap(),
+    );
 
     Box::into_raw(Box::new(CSdr {
         sdr_dev,
@@ -75,7 +110,6 @@ pub unsafe extern "C" fn free_sdr_device(csdr: *mut CSdr) {
     }
 }
 
-
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_lo_freq(csdr: *mut CSdr, f_lo_mega_hz: f64) {
     if csdr.is_null() {
@@ -84,10 +118,14 @@ pub unsafe extern "C" fn set_lo_freq(csdr: *mut CSdr, f_lo_mega_hz: f64) {
 
     let obj = unsafe { &mut *csdr };
     //obj.tx_cmd.send(DdcCmd::LoCh(lo_ch as isize)).unwrap();
-    let cmd=CtrlMsg::MixerSet { msg_id: 0, freq: f_lo_mega_hz, phase: 0.0, sync: 0 };
-    let _reply=obj.sdr_dev.ctrl.send_cmd(cmd);
+    let cmd = CtrlMsg::MixerSet {
+        msg_id: 0,
+        freq: f_lo_mega_hz,
+        phase: 0.0,
+        sync: 0,
+    };
+    let _reply = obj.sdr_dev.ctrl.send_cmd(cmd);
 }
-
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fetch_data(csdr: *mut CSdr, buf: *mut CComplex, npt: usize) {
@@ -99,6 +137,9 @@ pub unsafe extern "C" fn fetch_data(csdr: *mut CSdr, buf: *mut CComplex, npt: us
     let buf = unsafe { std::slice::from_raw_parts_mut(buf as *mut Complex<i16>, npt) };
     if obj.buffer.is_none() {
         obj.buffer = Some(obj.rx_payload.recv().unwrap());
+        if obj.rx_payload.len()>=16{
+            println!("almost full");
+        }
         obj.cursor = 0;
     }
 
@@ -114,6 +155,46 @@ pub unsafe extern "C" fn fetch_data(csdr: *mut CSdr, buf: *mut CComplex, npt: us
         let copy_len = (total - written).min(available);
         buf[written..written + copy_len]
             .copy_from_slice(&obj.buffer.as_ref().unwrap().data[obj.cursor..obj.cursor + copy_len]);
+        obj.cursor += copy_len;
+        written += copy_len;
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fetch_data_cf32(csdr: *mut CSdr, buf: *mut CComplexF32, npt: usize) {
+    if csdr.is_null() {
+        return;
+    }
+
+    let obj = unsafe { &mut *csdr };
+    let buf =
+        unsafe { std::slice::from_raw_parts_mut(buf as *mut Complex<f32> as *mut f32, npt * 2) };
+    if obj.buffer.is_none() {
+        obj.buffer = Some(obj.rx_payload.recv().unwrap());
+        obj.cursor = 0;
+    }
+
+    let mut written = 0;
+    let total = npt;
+    while written < total {
+        let available = N_PT_PER_FRAME - obj.cursor;
+        if available == 0 {
+            obj.buffer = Some(obj.rx_payload.recv().unwrap());
+            obj.cursor = 0;
+            continue;
+        }
+        let copy_len = (total - written).min(available);
+
+        let dst_buf = &mut buf[written * 2..written * 2 + copy_len * 2];
+        //let mut src_buf=obj.buffer.as_ref().unwrap().data[obj.cursor..obj.cursor + copy_len]
+        let src_buf = unsafe {
+            from_raw_parts(
+                obj.buffer.as_ref().unwrap().data.as_ptr().add(obj.cursor) as *const i16,
+                copy_len * 2,
+            )
+        };
+        convert_simd(src_buf, dst_buf);
+        //.copy_from_slice(&obj.buffer.as_ref().unwrap().data[obj.cursor..obj.cursor + copy_len]);
         obj.cursor += copy_len;
         written += copy_len;
     }
@@ -145,7 +226,6 @@ pub unsafe extern "C" fn set_mixer_freq(csdr: *mut CSdr, freq_mega_hz: f64, sync
     obj.sdr_dev.ctrl.set_mixer_freq(freq_mega_hz, sync);
 }
 
-
 /// # Safety
 ///
 /// This function should not be called before the horsemen are ready.
@@ -154,9 +234,6 @@ pub unsafe extern "C" fn stop_data_stream(csdr: *mut CSdr) {
     let obj = unsafe { &mut *csdr };
     obj.sdr_dev.ctrl.stream_stop();
 }
-
-
-
 
 /// # Safety
 ///
@@ -168,7 +245,7 @@ pub unsafe extern "C" fn find_device(
     max_n: usize,
     local_port: u16,
 ) -> usize {
-    let result = unsafe{from_raw_parts_mut(result, max_n)};
+    let result = unsafe { from_raw_parts_mut(result, max_n) };
     let ip = Ipv4Addr::from(addr);
 
     let addr = SocketAddrV4::new(ip, 3000);

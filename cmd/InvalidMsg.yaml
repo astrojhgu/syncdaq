@@ -1,0 +1,5 @@
+- !InvalidMsg
+  msg_id: 0
+  err_code: 0xff
+  len: 3
+  description: [1,2,3]  

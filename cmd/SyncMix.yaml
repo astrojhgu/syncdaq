@@ -1,0 +1,8 @@
+- !Sync
+  msg_id: 0
+- !MixerSet
+  msg_id: 0
+  freq: -120
+  phase: 0.0
+  
+  

@@ -1,0 +1,5 @@
+- !I2CWrite
+  msg_id: 0
+  dev_addr: 0x1c
+  len: 4
+  payload: [0x11,0x22,0x33,0x44]
