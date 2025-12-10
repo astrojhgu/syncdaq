@@ -1,5 +1,18 @@
 #![allow(static_mut_refs)]
 
+
+use crossbeam::channel::{Receiver, Sender};
+use lockfree_object_pool::LinearOwnedReusable;
+use num::Complex;
+
+use crate::{
+    ctrl_msg::{CtrlMsg, bcast_cmd, send_cmd},
+    payload::{Payload, n_pt_per_frame},
+    pipeline::RecvCmd,
+    sdr::Sdr,
+};
+
+
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     simd::{Simd, num::SimdInt},
@@ -28,16 +41,6 @@ fn convert_simd(src: &[i16], dst: &mut [f32]) {
     }
 }
 
-use crossbeam::channel::{Receiver, Sender};
-use lockfree_object_pool::LinearOwnedReusable;
-use num::Complex;
-
-use crate::{
-    ctrl_msg::{CtrlMsg, bcast_cmd, send_cmd},
-    payload::{N_PT_PER_FRAME, Payload},
-    pipeline::RecvCmd,
-    sdr::Sdr,
-};
 
 //use sdaa_ctrl::ctrl_msg::{CtrlMsg, bcast_cmd, send_cmd};
 
@@ -128,7 +131,7 @@ pub unsafe extern "C" fn set_lo_freq(csdr: *mut CSdr, f_lo_mega_hz: f64) {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fetch_data(csdr: *mut CSdr, buf: *mut CComplex, npt: usize) {
+pub unsafe extern "C" fn fetch_data_16(csdr: *mut CSdr, buf: *mut CComplex, npt: usize) {
     if csdr.is_null() {
         return;
     }
@@ -146,15 +149,16 @@ pub unsafe extern "C" fn fetch_data(csdr: *mut CSdr, buf: *mut CComplex, npt: us
     let mut written = 0;
     let total = npt;
     while written < total {
-        let available = N_PT_PER_FRAME - obj.cursor;
+        let available = n_pt_per_frame::<i16>() - obj.cursor;
         if available == 0 {
             obj.buffer = Some(obj.rx_payload.recv().unwrap());
             obj.cursor = 0;
             continue;
         }
         let copy_len = (total - written).min(available);
+        let buf_ci16=unsafe{from_raw_parts(obj.buffer.as_ref().unwrap().data.as_ptr() as *const Complex<i16>, n_pt_per_frame::<i16>())};
         buf[written..written + copy_len]
-            .copy_from_slice(&obj.buffer.as_ref().unwrap().data[obj.cursor..obj.cursor + copy_len]);
+            .copy_from_slice(&buf_ci16[obj.cursor..obj.cursor + copy_len]);
         obj.cursor += copy_len;
         written += copy_len;
     }
@@ -177,7 +181,7 @@ pub unsafe extern "C" fn fetch_data_cf32(csdr: *mut CSdr, buf: *mut CComplexF32,
     let mut written = 0;
     let total = npt;
     while written < total {
-        let available = N_PT_PER_FRAME - obj.cursor;
+        let available = n_pt_per_frame::<i16>() - obj.cursor;
         if available == 0 {
             obj.buffer = Some(obj.rx_payload.recv().unwrap());
             obj.cursor = 0;
@@ -205,7 +209,7 @@ pub unsafe extern "C" fn fetch_data_cf32(csdr: *mut CSdr, buf: *mut CComplexF32,
 /// This function should not be called before the horsemen are ready.
 #[unsafe(no_mangle)]
 pub extern "C" fn get_mtu() -> usize {
-    N_PT_PER_FRAME
+    n_pt_per_frame::<i16>()
 }
 
 /// # Safety

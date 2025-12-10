@@ -1,6 +1,10 @@
-use num::Complex;
+//use num::Complex;
 
-pub const N_PT_PER_FRAME: usize = 2048;
+pub const N_BYTE_PER_FRAME: usize = 8192;
+
+pub const fn n_pt_per_frame<T: Sized>()->usize{
+    N_BYTE_PER_FRAME/std::mem::size_of::<T>()/2
+}
 
 #[repr(C)]
 pub struct Payload{
@@ -10,12 +14,12 @@ pub struct Payload{
     pub data_type: u32,
     pub pkt_cnt: u64,
     pub tail_magic: u64,
-    pub data: [Complex<i16>; N_PT_PER_FRAME],
+    pub data: [u8; N_BYTE_PER_FRAME],
 }
 
 impl Default for Payload{
     fn default() -> Self {
-        Self { head_magic: 0, version: 0, port_id: 0, data_type: 0, pkt_cnt: 0, tail_magic: 0, data: [Complex::default(); N_PT_PER_FRAME] }
+        Self { head_magic: 0, version: 0, port_id: 0, data_type: 0, pkt_cnt: 0, tail_magic: 0, data: [0_u8; N_BYTE_PER_FRAME] }
     }
 }
 

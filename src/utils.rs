@@ -4,6 +4,7 @@ use std::{
     slice::{from_raw_parts, from_raw_parts_mut},
 };
 
+use num::Complex;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::ser::SerializeSeq;
 use serde::{Deserializer,Serializer};
@@ -11,6 +12,15 @@ use std::fmt;
 
 
 use libc::{SO_RCVBUF, SOL_SOCKET, setsockopt, socklen_t};
+
+pub fn as_complex_t<'a, 'b, T:Sized>(input: &'a[u8])->&'b[Complex<T>]
+where 
+    'b: 'a
+{
+    let npt=input.len()/std::mem::size_of::<T>()/2;
+    unsafe{from_raw_parts(input.as_ptr() as *const Complex<T>, npt)}
+}
+
 
 pub fn as_u8_slice<'a, 'b, T: Sized>(x: &'a T) -> &'b [u8]
 where
@@ -50,6 +60,7 @@ pub fn set_recv_buffer_size(socket: &UdpSocket, size: usize) -> std::io::Result<
         Err(std::io::Error::last_os_error())
     }
 }
+
 
 pub mod u8_hex_array {
     use super::*;
