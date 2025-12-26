@@ -83,7 +83,7 @@ pub enum Health {
     #[brw(magic(0x00_00_01_fe_u32))]
     T510Health{
         rfdc_restart_cnt: u32,
-        temperature: i32,
+        temperature: f32,
         nports: u32,     
         z:u32,   
         #[br(count=nports)]
