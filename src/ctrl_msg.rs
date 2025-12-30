@@ -242,9 +242,12 @@ pub enum CtrlMsg {
     #[brw(magic(0x00_00_00_0d_u32))]
     MixerSet{
         msg_id: u32,
-        freq: f64,
-        phase: f64,
+        nports: u32,
         sync: u32,
+        #[br(count=nports)]
+        freq: Vec<f64>,
+        #[br(count=nports)]
+        phase: Vec<f64>,
     },
     #[brw(magic(0xff_00_00_0d_u32))]
     MixerSetReply{
@@ -486,8 +489,8 @@ impl Display for CtrlMsg {
             CtrlMsg::SetClkReply { msg_id, clk_state }=>{
                 writeln!(f, "SetClkReply {{msg_id: {msg_id}, clk_state: {clk_state}}}")
             }
-            CtrlMsg::MixerSet { msg_id, freq, phase, sync, }=>{
-                writeln!(f, "MixerSet {{msg_id: {msg_id}, freq: {freq}, phase:{phase}, sync:{sync} }}")
+            CtrlMsg::MixerSet { msg_id, nports:_, freq, phase, sync, }=>{
+                writeln!(f, "MixerSet {{msg_id: {msg_id}, freq: {freq:?}, phase:{phase:?}, sync:{sync} }}")
             }
             CtrlMsg::MixerSetReply { msg_id }=>{
                 writeln!(f, "MixerSetReply {{msg_id: {msg_id}}}")

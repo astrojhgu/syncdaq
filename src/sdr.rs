@@ -51,8 +51,9 @@ impl SdrCtrl {
         if freq_mega_hz > -2000.0 && freq_mega_hz < 2000.0 {
             let cmd = CtrlMsg::MixerSet {
                 msg_id: 0,
-                freq: -freq_mega_hz,
-                phase: 0.0,
+                nports: 8,
+                freq: vec![-freq_mega_hz; 8],
+                phase: vec![0.0;8],
                 sync: sync,
             };
             self.send_cmd(cmd)

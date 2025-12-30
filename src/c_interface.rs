@@ -123,8 +123,9 @@ pub unsafe extern "C" fn set_lo_freq(csdr: *mut CSdr, f_lo_mega_hz: f64) {
     //obj.tx_cmd.send(DdcCmd::LoCh(lo_ch as isize)).unwrap();
     let cmd = CtrlMsg::MixerSet {
         msg_id: 0,
-        freq: f_lo_mega_hz,
-        phase: 0.0,
+        nports: 8,
+        freq: vec![f_lo_mega_hz;8],
+        phase: vec![0.0; 8],
         sync: 0,
     };
     let _reply = obj.sdr_dev.ctrl.send_cmd(cmd);
