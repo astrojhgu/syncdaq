@@ -12,7 +12,7 @@
 配置一台运行 dhcp服务的服务器，监听某个端口，假定改端口的ip地址是`192.168.1.1`。
 将T510采集板的`sfp28`口（已经编程为千兆以太网口）连接到服务器的对应端口。
 
-# 使用
+# 发送控制指令
 ## 一般性控制指令发送命令
 ```bash
 cargo run --bin send_cmd -- -a 192.168.1.255:3000 -c <指令内容文件名> -d 1 -t <超时秒数>
@@ -46,3 +46,20 @@ cargo run --bin send_cmd -- -a 192.168.1.255:3000 -c <指令内容文件名> -d 
 
 ## 停止数据传输
 `cargo run --bin send_cmd -- -a 192.168.1.255:3000 -c cmd1/StreamStop.yaml -d 1 -t 3;`
+
+# 抓取基带数据
+```bash
+$> cargo run --bin capture_pipeline --release -- -h
+Usage: capture_pipeline [OPTIONS] --addr <ip:port>
+
+Options:
+  -a, --addr <ip:port>                    
+  -o, --out <out name>                    
+  -F <out prefix for full dump file>      
+  -k <number of pkts per full dump file>  [default: 1000000]
+  -n <npkts_per_dump>                     [default: 100]
+  -m <dumps per npkt>                     [default: 100000]
+  -p <npkts to dump>                      
+  -h, --help                              Print help
+  -V, --version                           Print version
+```
