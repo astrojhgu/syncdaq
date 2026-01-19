@@ -10,7 +10,27 @@
 
 # 准备一台运行dhcp服务的机器
 配置一台运行 dhcp服务的服务器，监听某个端口，假定改端口的ip地址是`192.168.1.1`。
+
 将T510采集板的`sfp28`口（已经编程为千兆以太网口）连接到服务器的对应端口。
+
+
+## 使用`udhcpd`作为临时的dhcp服务器
+如果不想配置全局服务，可以安装`udhcpd`，编写如下配置文件：
+```bash
+start 192.168.1.100
+end 192.168.1.150
+interface enp0s20f0u2 #注意这里的网卡名称要和所使用的端口匹配
+opt lease 3600
+lease_file /tmp/my-leases.leases
+```
+运行如下命令
+```bash
+sudo touch /tmp/my-leases.leases
+sudo udhcpd -f ./udhcp.conf
+```
+
+注意防火墙要放行67和68号UDP端口。
+
 
 # 发送控制指令
 ## 一般性控制指令发送命令
