@@ -261,7 +261,15 @@ pub enum CtrlMsg {
     #[brw(magic(0xff_00_00_0e_u32))]
     PortMaskReply{
         msg_id: u32, 
-    }
+    },
+    #[brw(magic(0x00_00_00_ff_u32))]
+    Reboot{
+        msg_id: u32, 
+    },
+    #[brw(magic(0xff_00_00_ff_u32))]
+    RebootReply{
+        msg_id: u32, 
+    },
 }
 
 impl Display for CtrlMsg {
@@ -501,6 +509,12 @@ impl Display for CtrlMsg {
             CtrlMsg::PortMaskReply { msg_id }=>{
                 writeln!(f, "PortMaskReply{{msg_id:{msg_id}}}")
             }
+            CtrlMsg::Reboot { msg_id }=>{
+                writeln!(f, "Reboot{{msg_id:{msg_id}}}")
+            }
+            CtrlMsg::RebootReply { msg_id }=>{
+                writeln!(f, "RebootReply{{msg_id:{msg_id}}}")
+            }
         }?;
         writeln!(f, "=====================")
     }
@@ -547,6 +561,8 @@ impl CtrlMsg {
             MixerSetReply{ msg_id }=>*msg_id=mid,
             PortMask{msg_id,..}=>*msg_id=mid,
             PortMaskReply{msg_id}=>*msg_id=mid,
+            Reboot{ msg_id, .. }=>*msg_id=mid,
+            RebootReply{ msg_id, .. }=>*msg_id=mid,
         }
     }
 
@@ -594,6 +610,8 @@ impl CtrlMsg {
             MixerSetReply{ msg_id }=>*msg_id,
             PortMask{msg_id,..}=>*msg_id,
             PortMaskReply{msg_id}=>*msg_id,
+            Reboot{ msg_id, .. }=>*msg_id,
+            RebootReply{ msg_id, .. }=>*msg_id,
         }
     }
 }
