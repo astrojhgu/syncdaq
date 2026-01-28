@@ -97,3 +97,34 @@ Options:
   -h, --help                              Print help
   -V, --version                           Print version
 ```
+
+# 故障排除
+## 控制端口无法从dhcp处获得ip地址
+可能原因：
+1. dhcp服务器没有启动
+2. dhcp虽然启动了，但是在配置文件中没有绑定在正确的端口上
+3. dhcp虽然启动了，但是防火墙没有放行相应的端口
+4. 板卡要使用SFP口，不要使用板卡上的RJ-45口
+
+## 指令能发出，从console看，板卡确实收到了指令，但是用户端没有看到指令的回复
+可能是用来发送指令的千兆端口的ip地址和本机上其他端口的处于同一个网段，这样就触发了linux的反向过滤策略。解决方案：
+
+```bash
+sudo nano /etc/sysctl.d/99-rpfilter.conf
+```
+加入如下两行：
+```bash
+net.ipv4.conf.all.rp_filter = 0
+net.ipv4.conf.default.rp_filter = 0
+```
+然后用如下命令使能该配置
+```bash
+sudo sysctl -p /etc/sysctl.d/99-rpfilter.conf
+```
+
+## 能响应指令，但是没有无法捕捉到数据
+1. 100G端口参数没有正确配置，特别是mtu，要设置为9000
+2. 100G端口的参数没有正确装订，即装订的100G网口参数和用来收数据的100G端口不一致
+3. 防火墙没有正确配置为放行特定的端口
+4. 可能还是反向过滤的原因，参见上面关于千兆网口反向过滤的解决方案
+
