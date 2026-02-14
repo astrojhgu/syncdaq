@@ -346,7 +346,27 @@ pub unsafe extern "C" fn start_stream(ip: u32, local_port: u16) -> bool {
 
     let local_addr = format!("0.0.0.0:{local_port}");
 
-    let cmd = CtrlMsg::StreamStart { msg_id: 0 };
+    let cmd: CtrlMsg = CtrlMsg::StreamStart { msg_id: 0 };
+
+    let summary = send_cmd(cmd, &[addr], &local_addr, Some(Duration::from_secs(5)), 1);
+    if summary.normal_reply.len() != 1 {
+        return false;
+    }
+
+    true
+}
+
+/// # Safety
+///
+/// This function should not be called before the horsemen are ready.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn stop_stream(ip: u32, local_port: u16) -> bool {
+    let ip = Ipv4Addr::from(ip);
+    let addr = SocketAddrV4::new(ip, 3000);
+
+    let local_addr = format!("0.0.0.0:{local_port}");
+
+    let cmd: CtrlMsg = CtrlMsg::StreamStop { msg_id: 0 };
 
     let summary = send_cmd(cmd, &[addr], &local_addr, Some(Duration::from_secs(5)), 1);
     if summary.normal_reply.len() != 1 {
