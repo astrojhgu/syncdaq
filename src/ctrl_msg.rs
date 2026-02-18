@@ -320,8 +320,9 @@ impl Display for CtrlMsg {
                 let year:u32    = 2000+((fm_ver >> 17) & 0x3F);
                 let hour:u32    = (fm_ver >> 12) & 0x1F;
                 let minute:u32  = (fm_ver >> 6)  & 0x3F;
+                let second:u32  = fm_ver & 0x3F;
 
-                write!(f, "QueryReply{{msg_id: {msg_id}, fm_ver: 0x{fm_ver:x} ({year}-{month:02}-{day:02} {hour}:{minute}), tick_cnt1: {tick_cnt1}, tick_cnt2: {tick_cnt2}, trans_state: 0x{trans_state:x}, locked: 0x{locked:x}, Health: {health}")?;
+                write!(f, "QueryReply{{msg_id: {msg_id}, fm_ver: 0x{fm_ver:x} ({year}-{month:02}-{day:02} {hour}:{minute}:{second:02}), tick_cnt1: {tick_cnt1}, tick_cnt2: {tick_cnt2}, trans_state: 0x{trans_state:x}, locked: 0x{locked:x}, Health: {health}")?;
                 writeln!(f, "}}")?;
                 if *locked & 0x00_00_00_0f!=0x0f{
                     writeln!(f, "Lock stat abnormal!")?;
