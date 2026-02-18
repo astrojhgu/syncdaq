@@ -59,33 +59,13 @@ impl Display for XGbeCfg {
 #[binrw]
 #[brw(little)]
 pub enum Health {
-    #[brw(magic(0x31_76_6c_68_u32))]
-    HLHealth {
-        nhealth: u32,
-        xgbe_state: [u32; 4],
-        pkt_sent: [u64; 4],
-        volt12_inner: u32,
-        volt12_input: u32,
-        vcc1v0: u32,
-        vcc1v8: u32,
-        mgtavtt1v2: u32,
-        mgtavtt1v0: u32,
-        temperatures: [u32; 2],
-    },
-
-    #[brw(magic(0x78_56_34_12_u32))]
-    TEHealth {
-        nhealth: u32,
-        #[br(count=nhealth)]
-        payload: Vec<u32>,
-    },
-
     #[brw(magic(0x00_00_01_fe_u32))]
     T510Health{
         rfdc_restart_cnt: u32,
+        //fifo_full_cnt: u32,
         temperature: f32,
         nports: u32,     
-        z:u32,   
+        fifo_full_cnt:u32,   
         #[br(count=nports)]
         pkt_cnt1: Vec<u64>,
         #[br(count=nports)]
@@ -94,6 +74,41 @@ pub enum Health {
         pkt_cnt2: Vec<u64>,
         #[br(count=nports)]
         axi_frame_cnt2: Vec<u64>,
+    }
+}
+
+impl Display for Health{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self{
+            &Health::T510Health{rfdc_restart_cnt,temperature, nports, fifo_full_cnt,ref pkt_cnt1, ref axi_frame_cnt1, ref pkt_cnt2, ref axi_frame_cnt2}=>{
+                write!(f, "T510Health{{")?;
+                write!(f, "rfdc_restart_cnt: {}, ", rfdc_restart_cnt)?;
+                write!(f, "temperature: {} degC, ", temperature)?;
+                write!(f, "nports: {}, ", nports)?;
+                write!(f, "fifo_full_cnt: {}, ", fifo_full_cnt)?;
+                write!(f, "pkt_cnt1: [")?;
+                for x in pkt_cnt1{
+                    write!(f, "{}, ", x)?;
+                }
+                write!(f, "], ")?;
+                write!(f, "axi_frame_cnt1: [")?;
+                for x in axi_frame_cnt1{
+                    write!(f, "{}, ", x)?;
+                }
+                write!(f, "], ")?;
+                write!(f, "pkt_cnt2: [")?;
+                for x in pkt_cnt2{
+                    write!(f, "{}, ", x)?;
+                }
+                write!(f, "], ")?;
+                write!(f, "axi_frame_cnt2: [")?;
+                for x in axi_frame_cnt2{
+                    write!(f, "{}, ", x)?;
+                }
+                write!(f, "]")?;
+            }
+        }
+        write!(f, "}}")
     }
 }
 
@@ -300,7 +315,13 @@ impl Display for CtrlMsg {
                 locked,
                 health,
             } => {
-                write!(f, "QueryReply{{msg_id: {msg_id}, fm_ver: 0x{fm_ver:x}, tick_cnt1: {tick_cnt1}, tick_cnt2: {tick_cnt2}, trans_state: 0x{trans_state:x}, locked: 0x{locked:x}, Health: {health:?}")?;
+                let day:u32     = (fm_ver >> 27) & 0x1F;
+                let month:u32   = (fm_ver >> 23) & 0x0F;
+                let year:u32    = 2000+((fm_ver >> 17) & 0x3F);
+                let hour:u32    = (fm_ver >> 12) & 0x1F;
+                let minute:u32  = (fm_ver >> 6)  & 0x3F;
+
+                write!(f, "QueryReply{{msg_id: {msg_id}, fm_ver: 0x{fm_ver:x} ({year}-{month:02}-{day:02} {hour}:{minute}), tick_cnt1: {tick_cnt1}, tick_cnt2: {tick_cnt2}, trans_state: 0x{trans_state:x}, locked: 0x{locked:x}, Health: {health}")?;
                 writeln!(f, "}}")?;
                 if *locked & 0x00_00_00_0f!=0x0f{
                     writeln!(f, "Lock stat abnormal!")?;
