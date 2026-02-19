@@ -85,7 +85,8 @@ impl Display for Health{
                 write!(f, "rfdc_restart_cnt: {}, ", rfdc_restart_cnt)?;
                 write!(f, "temperature: {} degC, ", temperature)?;
                 write!(f, "nports: {}, ", nports)?;
-                write!(f, "fifo_full_cnt: {}, ", fifo_full_cnt)?;
+                write!(f, "fifo_full_cnt: {}, ", fifo_full_cnt>>16)?;
+                write!(f, "fifo_len: {}, ", fifo_full_cnt&0xffff)?;
                 write!(f, "pkt_cnt1: [")?;
                 for x in pkt_cnt1{
                     write!(f, "{}, ", x)?;
