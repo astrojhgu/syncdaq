@@ -1,3 +1,6 @@
 language = "C++"
 include_guard = "SDAA_DATA_H"
 namespace = "syncdaq"
+
+[export]
+include=["Payload"]
