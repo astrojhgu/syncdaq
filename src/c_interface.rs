@@ -8,7 +8,6 @@ use num::Complex;
 use crate::{
     ctrl_msg::{CtrlMsg, bcast_cmd, send_cmd},
     payload::{Payload, n_pt_per_frame},
-    pipeline::RecvCmd,
     sdr::Sdr,
 };
 
@@ -47,7 +46,6 @@ fn convert_simd(src: &[i16], dst: &mut [f32]) {
 pub struct CSdr {
     sdr_dev: Sdr,
     rx_payload: Receiver<LinearOwnedReusable<Payload>>,
-    tx_cmd: Sender<RecvCmd>,
     buffer: Option<LinearOwnedReusable<Payload>>,
     cursor: usize,
 }
@@ -80,7 +78,7 @@ pub extern "C" fn new_sdr_device(
     let local_payload_addr =
         SocketAddrV4::new(Ipv4Addr::from(local_payload_ip), local_payload_port);
 
-    let (sdr_dev, rx_payload, tx_cmd) = Sdr::new(
+    let (sdr_dev, rx_payload) = Sdr::new(
         remote_ctrl_addr,
         local_ctrl_addr,
         local_payload_addr,
@@ -90,7 +88,6 @@ pub extern "C" fn new_sdr_device(
     Box::into_raw(Box::new(CSdr {
         sdr_dev,
         rx_payload,
-        tx_cmd,
         buffer: None,
         cursor: 0,
     }))
@@ -103,12 +100,9 @@ pub unsafe extern "C" fn free_sdr_device(csdr: *mut CSdr) {
         let CSdr {
             sdr_dev: _,
             rx_payload,
-            tx_cmd,
             buffer: _,
             cursor: _,
         } = *obj;
-        tx_cmd.send(RecvCmd::Destroy).unwrap();
-        drop(tx_cmd);
         drop(rx_payload);
     }
 }

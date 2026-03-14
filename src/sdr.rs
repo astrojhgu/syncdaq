@@ -8,12 +8,12 @@ use std::{
 
 use serde_yaml::from_reader;
 
-use crossbeam::channel::{Receiver, Sender, bounded};
+use crossbeam::channel::{Receiver, bounded};
 use lockfree_object_pool::LinearOwnedReusable;
 
 
 use crate::{
-    ctrl_msg::{CmdReplySummary, CtrlMsg, send_cmd}, payload::Payload, pipeline::{RecvCmd, recv_pkt}
+    ctrl_msg::{CmdReplySummary, CtrlMsg, send_cmd}, payload::Payload, pipeline::recv_pkt
 };
 
 pub struct SdrCtrl {
@@ -97,7 +97,7 @@ impl Sdr {
         local_ctrl_addr: SocketAddrV4,
         local_payload_addr: SocketAddrV4,
         init_file: P,
-    ) -> (Sdr, Receiver<LinearOwnedReusable<Payload>>, Sender<RecvCmd>) {
+    ) -> (Sdr, Receiver<LinearOwnedReusable<Payload>>) {
         let ctrl = SdrCtrl {
             remote_ctrl_addr,
             local_ctrl_addr,
@@ -117,16 +117,14 @@ impl Sdr {
             1,
         );
         let (tx_payload, rx_payload) = bounded::<LinearOwnedReusable<Payload>>(8192);
-        let (tx_recv_cmd, rx_recv_cmd) = bounded::<RecvCmd>(32);
         let rx_thread =
-            std::thread::spawn(|| recv_pkt(payload_socket.into(), tx_payload, rx_recv_cmd));
+            std::thread::spawn(|| recv_pkt(payload_socket.into(), tx_payload));
         (
             Sdr {
                 rx_thread: Some(rx_thread),
                 ctrl,
             },
-            rx_payload,
-            tx_recv_cmd,
+            rx_payload
         )
     }
 }

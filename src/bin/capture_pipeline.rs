@@ -46,9 +46,8 @@ fn main() {
     set_recv_buffer_size(&socket, 10 * 1024 * 1024 * 1024).unwrap();
     //let (tx, rx) = bounded::<LinearOwnedReusable<Payload>>(65536);
     let (tx, rx) = unbounded::<LinearOwnedReusable<Payload>>();
-    let (_tx_cmd, rx_cmd) = unbounded();
     //let pool1 = Arc::clone(&pool);
-    std::thread::spawn(|| recv_pkt(socket.into(), tx, rx_cmd));
+    std::thread::spawn(|| recv_pkt(socket.into(), tx));
 
     let mut npkt_to_dump = 0;
     let mut dump_file = None;

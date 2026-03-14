@@ -64,10 +64,6 @@ impl From<UdpSocket> for MaybeMulticastReceiver {
     }
 }
 
-pub enum RecvCmd {
-    Destroy,
-}
-
 // pub fn fake_dev(tx_payload: Sender<LinearOwnedReusable<Payload>>, rx_cmd: Receiver<RecvCmd>) {
 //     let mut last_print_time = Instant::now();
 //     let t0 = Instant::now();
@@ -119,7 +115,7 @@ pub enum RecvCmd {
 pub fn recv_pkt(
     socket: MaybeMulticastReceiver,
     tx_payload: Sender<LinearOwnedReusable<Payload>>,
-    rx_cmd: Receiver<RecvCmd>,
+    //rx_cmd: Receiver<RecvCmd>,
 ) {
     let mut last_print_time = Instant::now();
     let print_interval = Duration::from_secs(2);
@@ -142,11 +138,6 @@ pub fn recv_pkt(
         .set_read_timeout(Some(Duration::from_secs(1)))
         .expect("failed to set timeout");
     loop {
-        if !rx_cmd.is_empty() {
-            match rx_cmd.recv().expect("failed to recv cmd") {
-                RecvCmd::Destroy => break,
-            }
-        }
         let mut payload = pool.pull_owned();
         let buf = as_mut_u8_slice(&mut payload as &mut Payload);
         match socket.recv_from(buf) {
@@ -192,11 +183,6 @@ pub fn recv_pkt(
                 *c = payload.pkt_cnt + 1;
                 if tx_payload.is_full() {
                     //eprint!("O");
-                    if !rx_cmd.is_empty() {
-                        match rx_cmd.recv().expect("failed to recv cmd") {
-                            RecvCmd::Destroy => return,
-                        }
-                    }
                     continue;
                 }
                 nreceived += 1;
@@ -214,11 +200,6 @@ pub fn recv_pkt(
             payload1.pkt_cnt = *c;
             if tx_payload.is_full() {
                 //eprint!("O");
-                if !rx_cmd.is_empty() {
-                    match rx_cmd.recv().expect("failed to recv cmd") {
-                        RecvCmd::Destroy => return,
-                    }
-                }
                 continue;
             }
             nreceived += 1;
@@ -230,4 +211,3 @@ pub fn recv_pkt(
         }
     }
 }
-
