@@ -10,9 +10,10 @@ use chrono::Local;
 use crossbeam::channel::{Receiver, Sender};
 use lockfree_object_pool::{LinearObjectPool, LinearOwnedReusable};
 
+use num::Complex;
 
 use crate::{
-    payload::Payload,
+    payload::{N_BYTE_PER_FRAME, Payload},
     utils::as_mut_u8_slice,
 };
 
@@ -182,7 +183,7 @@ pub fn recv_pkt(
                 //actually = is sufficient.
                 *c = payload.pkt_cnt + 1;
                 if tx_payload.is_full() {
-                    //eprint!("O");
+                    eprint!("O");
                     continue;
                 }
                 nreceived += 1;
@@ -199,7 +200,7 @@ pub fn recv_pkt(
             payload1.copy_header(&payload);
             payload1.pkt_cnt = *c;
             if tx_payload.is_full() {
-                //eprint!("O");
+                eprint!("O");
                 continue;
             }
             nreceived += 1;
@@ -208,6 +209,37 @@ pub fn recv_pkt(
             }
 
             *c += 1;
+        }
+    }
+}
+
+pub fn strip_meta_data_c16(
+    rx_payload: Receiver<LinearOwnedReusable<Payload>>,
+    tx_naked_data: Sender<LinearOwnedReusable<Vec<Complex<i16>>>>,
+) {
+    const N_PT_PER_FRAME: usize = N_BYTE_PER_FRAME / std::mem::size_of::<Complex<i16>>();
+
+    let pool: Arc<LinearObjectPool<Vec<Complex<i16>>>> = Arc::new(LinearObjectPool::new(
+        move || vec![Complex::<i16>::default(); N_PT_PER_FRAME],
+        |_v: &mut Vec<Complex<i16>>| {},
+    ));
+    loop {
+        if let Ok(payload) = rx_payload.recv() {
+            let mut naked_data = pool.pull_owned();
+            //let naked_data_u8 = as_mut_u8_slice(&mut naked_data);
+            let naked_data_u8 = unsafe {
+                std::slice::from_raw_parts_mut(
+                    naked_data.as_mut_ptr() as *mut u8,
+                    naked_data.len() * std::mem::size_of::<Complex<i16>>(),
+                )
+            };
+            assert_eq!(naked_data_u8.len(), payload.data.len());
+            naked_data_u8.copy_from_slice(&payload.data);
+            if tx_naked_data.send(naked_data).is_err() {
+                return;
+            }
+        }else{
+            break;
         }
     }
 }

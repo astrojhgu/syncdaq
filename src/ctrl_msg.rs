@@ -10,7 +10,7 @@ use binrw::{binrw, BinRead, BinWrite};
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 
-use rand::{rng, Rng};
+use rand::{RngExt, rng};
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug)]
 #[binrw]
