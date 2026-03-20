@@ -113,25 +113,29 @@ impl From<UdpSocket> for MaybeMulticastReceiver {
 //     }
 // }
 
-pub fn recv_pkt(
+pub fn recv_pkt<T>
+(
     socket: MaybeMulticastReceiver,
-    tx_payload: Sender<LinearOwnedReusable<Payload>>,
+    tx_payload: Sender<LinearOwnedReusable<Payload<T>>>,
     //rx_cmd: Receiver<RecvCmd>,
-) {
+) 
+where [(); N_BYTE_PER_FRAME/std::mem::size_of::<T>()]: Sized,
+T: Sized+Default+Copy+'static,
+{
     let mut last_print_time = Instant::now();
     let print_interval = Duration::from_secs(2);
 
     let mut next_cnt = None;
     let mut ndropped = 0;
     let mut nreceived = 0;
-    let pool: Arc<LinearObjectPool<Payload>> = Arc::new(LinearObjectPool::new(
+    let pool: Arc<LinearObjectPool<Payload<T>>> = Arc::new(LinearObjectPool::new(
         move || {
             //eprint!("o");
-            Payload::default()
+            Payload::<T>::default()
         },
         |v| {
             v.pkt_cnt = 0;
-            v.data.fill(0);
+            v.data.fill(T::default());
         },
     ));
     //socket.set_nonblocking(true).unwrap();
@@ -140,10 +144,10 @@ pub fn recv_pkt(
         .expect("failed to set timeout");
     loop {
         let mut payload = pool.pull_owned();
-        let buf = as_mut_u8_slice(&mut payload as &mut Payload);
+        let buf = as_mut_u8_slice(&mut payload as &mut Payload<T>);
         match socket.recv_from(buf) {
             Ok((s, _a)) => {
-                if s != std::mem::size_of::<Payload>() {
+                if s != std::mem::size_of::<Payload<T>>() {
                     continue;
                 }
             }
@@ -214,7 +218,7 @@ pub fn recv_pkt(
 }
 
 pub fn strip_meta_data_c16(
-    rx_payload: Receiver<LinearOwnedReusable<Payload>>,
+    rx_payload: Receiver<LinearOwnedReusable<Payload<u8>>>,
     tx_naked_data: Sender<LinearOwnedReusable<Vec<Complex<i16>>>>,
 ) {
     const N_PT_PER_FRAME: usize = N_BYTE_PER_FRAME / std::mem::size_of::<Complex<i16>>();

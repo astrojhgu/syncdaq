@@ -1,7 +1,7 @@
 #![allow(static_mut_refs)]
 
 
-use crossbeam::channel::{Receiver, Sender};
+use crossbeam::channel::{Receiver};
 use lockfree_object_pool::LinearOwnedReusable;
 use num::Complex;
 
@@ -45,8 +45,8 @@ fn convert_simd(src: &[i16], dst: &mut [f32]) {
 
 pub struct CSdr {
     sdr_dev: Sdr,
-    rx_payload: Receiver<LinearOwnedReusable<Payload>>,
-    buffer: Option<LinearOwnedReusable<Payload>>,
+    rx_payload: Receiver<LinearOwnedReusable<Payload<u8>>>,
+    buffer: Option<LinearOwnedReusable<Payload<u8>>>,
     cursor: usize,
 }
 

@@ -1,12 +1,11 @@
 use lockfree_object_pool::LinearOwnedReusable;
+use num::Complex;
 use std::{fs::File, io::Write, net::UdpSocket};
 
 use clap::Parser;
 use crossbeam::channel::unbounded;
 use syncdaq::{
-    payload::Payload,
-    pipeline::recv_pkt,
-    utils::{as_u8_slice, set_recv_buffer_size},
+    firdecim2::{decim_pipeline::start_decim_pipeline_chain, fir_coeffs::{self, fir_coeffs}}, payload::Payload, pipeline::recv_pkt, utils::{as_u8_slice, set_recv_buffer_size}
 };
 
 #[derive(Parser, Debug)]
@@ -36,6 +35,9 @@ struct Args {
 
     #[clap(short = 'p', value_name = "npkts to dump")]
     npkts_to_recv: Option<usize>,
+
+    #[clap(short = 's', long = "shift", num_args(1..), value_name = "bit shift for each stage")]
+    bit_shifts: Vec<u32>,
 }
 
 fn main() {
@@ -45,9 +47,10 @@ fn main() {
     let socket = UdpSocket::bind(&args.local_addr).expect("failed to bind local addr");
     set_recv_buffer_size(&socket, 10 * 1024 * 1024 * 1024).unwrap();
     //let (tx, rx) = bounded::<LinearOwnedReusable<Payload>>(65536);
-    let (tx, rx) = unbounded::<LinearOwnedReusable<Payload<u8>>>();
+    let (tx, rx) = unbounded::<LinearOwnedReusable<Payload<Complex<i16>>>>();
     //let pool1 = Arc::clone(&pool);
     std::thread::spawn(|| recv_pkt(socket.into(), tx));
+
 
     let mut npkt_to_dump = 0;
     let mut dump_file = None;
@@ -59,6 +62,9 @@ fn main() {
     });
     let mut npkts_full_dump = 0;
     let mut total_npkts_received = 0;
+    let fir_coeffs=fir_coeffs();
+
+    let (_th, rx)=start_decim_pipeline_chain(rx, &fir_coeffs, &args.bit_shifts);
 
     loop {
         let payload = rx.recv().expect("failed to recv payload");

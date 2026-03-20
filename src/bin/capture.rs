@@ -27,7 +27,7 @@ fn main() {
     let args = Args::parse();
 
     let socket = UdpSocket::bind(&args.local_addr).unwrap();
-    let mut payload = Payload::default();
+    let mut payload = Payload::<u8>::default();
 
     let x = as_mut_u8_slice(&mut payload);
 
@@ -37,7 +37,7 @@ fn main() {
     let mut next_cnt = None;
     loop {
         let (s, _a) = socket.recv_from(x).unwrap();
-        if s != std::mem::size_of::<Payload>() {
+        if s != std::mem::size_of::<Payload<u8>>() {
             continue;
         }
 

@@ -40,7 +40,7 @@ fn main() {
     let socket = UdpSocket::bind(&args.local_addr).expect("failed to bind local addr");
     set_recv_buffer_size(&socket, 10 * 1024 * 1024 * 1024).unwrap();
     //let (tx, rx) = bounded::<LinearOwnedReusable<Payload>>(65536);
-    let (tx, rx) = unbounded::<LinearOwnedReusable<Payload>>();
+    let (tx, rx) = unbounded::<LinearOwnedReusable<Payload<u8>>>();
     //let pool1 = Arc::clone(&pool);
     std::thread::spawn(|| recv_pkt(socket.into(), tx));
 

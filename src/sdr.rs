@@ -13,7 +13,7 @@ use lockfree_object_pool::LinearOwnedReusable;
 
 
 use crate::{
-    ctrl_msg::{CmdReplySummary, CtrlMsg, send_cmd}, payload::Payload, pipeline::recv_pkt
+    ctrl_msg::{CmdReplySummary, CtrlMsg, send_cmd}, payload::{Payload, N_BYTE_PER_FRAME}, pipeline::recv_pkt
 };
 
 pub struct SdrCtrl {
@@ -92,12 +92,16 @@ impl Drop for Sdr {
 
 impl Sdr {
     #[allow(clippy::type_complexity)]
-    pub fn new<P: std::fmt::Debug+AsRef<Path>>(
+    pub fn new<P, T>(
         remote_ctrl_addr: SocketAddrV4,
         local_ctrl_addr: SocketAddrV4,
         local_payload_addr: SocketAddrV4,
         init_file: P,
-    ) -> (Sdr, Receiver<LinearOwnedReusable<Payload>>) {
+    ) -> (Sdr, Receiver<LinearOwnedReusable<Payload<T>>>)
+    where P: std::fmt::Debug+AsRef<Path>,
+    [T; N_BYTE_PER_FRAME/std::mem::size_of::<T>()]: Sized,
+    T: Sized+Default+Copy+Send+Sync+'static,
+     {
         let ctrl = SdrCtrl {
             remote_ctrl_addr,
             local_ctrl_addr,
@@ -116,7 +120,7 @@ impl Sdr {
             Some(Duration::from_secs(10)),
             1,
         );
-        let (tx_payload, rx_payload) = bounded::<LinearOwnedReusable<Payload>>(8192);
+        let (tx_payload, rx_payload) = bounded::<LinearOwnedReusable<Payload<T>>>(8192);
         let rx_thread =
             std::thread::spawn(|| recv_pkt(payload_socket.into(), tx_payload));
         (
