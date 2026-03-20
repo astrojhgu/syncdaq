@@ -5,7 +5,7 @@ use std::{fs::File, io::Write, net::UdpSocket};
 use clap::Parser;
 use crossbeam::channel::unbounded;
 use syncdaq::{
-    firdecim2::{decim_pipeline::start_decim_pipeline_chain, fir_coeffs::{self, fir_coeffs}}, payload::Payload, pipeline::recv_pkt, utils::{as_u8_slice, set_recv_buffer_size}
+    firdecim2::{decim_pipeline::start_decim_pipeline_chain, fir_coeffs::fir_coeffs}, payload::Payload, pipeline::recv_pkt, utils::{as_u8_slice, set_recv_buffer_size}
 };
 
 #[derive(Parser, Debug)]
