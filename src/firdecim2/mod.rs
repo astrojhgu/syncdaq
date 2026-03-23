@@ -1,4 +1,5 @@
 pub mod decim_pipeline;
+pub mod decim_async_pipeline;
 pub mod firdec_worker;
 pub mod fir_coeffs;
 
