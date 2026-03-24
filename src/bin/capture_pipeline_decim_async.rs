@@ -1,6 +1,7 @@
 #![feature(generic_const_exprs)]
 use futures_util::{StreamExt, pin_mut};
 use lockfree_object_pool::LinearOwnedReusable;
+use num::Complex;
 use std::{
     io::Write,
     net::{Ipv4Addr, SocketAddrV4},
@@ -14,9 +15,7 @@ use tokio::{
 use clap::Parser;
 use crossbeam::channel::unbounded;
 use syncdaq::{
-    async_pipeline::{MaybeMulticastReceiver, recv_pkt},
-    payload::Payload,
-    utils::{as_u8_slice, set_recv_buffer_size},
+    async_pipeline::{MaybeMulticastReceiver, recv_pkt}, firdecim2::{decim_async_pipeline::decim2_chained, fir_coeffs::fir_coeffs}, payload::Payload, utils::{as_u8_slice, set_recv_buffer_size}
 };
 
 #[derive(Parser, Debug)]
@@ -49,9 +48,13 @@ struct Args {
 
     #[clap(short = 'b', value_name = "buffer size in MB")]
     buffer_size_mega_byte: Option<usize>,
+
+    #[clap(short = 's', long = "shift", num_args(1..), value_name = "bit shift for each stage")]
+    bit_shifts: Vec<u32>,
 }
 
-#[tokio::main]
+//#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
     //let (tx,rx)=bounded(256);
     let args = Args::parse();
@@ -61,8 +64,9 @@ async fn main() {
 
     let socket = UdpSocket::bind(&addr).await.unwrap().into();
     
-    //let pool1 = Arc::clone(&pool);
-    let s = recv_pkt::<u8>(socket,256);
+    let s = recv_pkt::<Complex<i16>>(socket,8192);
+    let fir_coeffs=fir_coeffs();
+    let s=decim2_chained(s, &fir_coeffs, &args.bit_shifts);
 
     pin_mut!(s);
 

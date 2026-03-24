@@ -6,10 +6,7 @@ use lockfree_object_pool::{LinearObjectPool, LinearOwnedReusable};
 use tokio::task::spawn_blocking;
 
 use std::{
-    net::{Ipv4Addr, SocketAddrV4},
-    ops::{Deref, DerefMut},
-    sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    net::{Ipv4Addr, SocketAddrV4}, ops::{Deref, DerefMut}, pin::Pin, sync::{Arc, Mutex}, time::{Duration, Instant}
 };
 
 use num::{Complex, Zero};
@@ -111,4 +108,17 @@ pub fn decim2(
             yield output;
         }
     }
+}
+
+pub fn decim2_chained<'a>(
+    input: impl Stream<Item = LinearOwnedReusable<Payload<Complex<i16>>>>+'a,
+    fir_coeffs: &'a [i16],
+    bit_shifts: &'a [u32],
+) -> Pin<Box<dyn Stream<Item = LinearOwnedReusable<Payload<Complex<i16>>>>+'a >>{
+    let mut output:Pin<Box<dyn Stream<Item=LinearOwnedReusable<Payload<Complex<i16>>>>>>=Box::pin(input);
+    for &bs in bit_shifts{
+        let s=decim2(output, fir_coeffs, bs);
+        output=Box::pin(s);
+    }
+    output
 }

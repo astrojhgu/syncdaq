@@ -83,7 +83,7 @@ async fn main() {
     };
 
     tokio::spawn(async move {
-        let s = recv_pkt(socket);
+        let s = recv_pkt(socket,256);
         pin_mut!(s);
         while let Some(payload) = s.next().await {
             if tx.send(payload).await.is_err() {

@@ -4,10 +4,14 @@ use std::{
     slice::{from_raw_parts, from_raw_parts_mut},
 };
 
+use futures_core::Stream;
+use futures_util::StreamExt;
 use num::Complex;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::ser::SerializeSeq;
 use serde::{Deserializer,Serializer};
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use std::fmt;
 
 
@@ -132,4 +136,27 @@ pub mod u8_hex_array {
 
         deserializer.deserialize_seq(U8HexVisitor)
     }
+}
+
+
+pub fn async_buffer<S>(mut input_stream: S, buffer_size: usize) -> impl Stream<Item = S::Item>
+where
+    S: Stream + Send+Unpin+'static,
+    S::Item: Send+Unpin+'static,
+{
+    // 1. 创建异步通道作为缓冲区
+    let (tx, rx) = mpsc::channel(buffer_size);
+
+    // 2. 启动独立任务进行“推”操作
+    tokio::spawn(async move {
+        while let Some(item) = input_stream.next().await {
+            // 如果 tx.send 失败，说明下游接收端（ReceiverStream）已关闭
+            if tx.send(item).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // 3. 将 Receiver 包装回 Stream 返回
+    ReceiverStream::new(rx)
 }

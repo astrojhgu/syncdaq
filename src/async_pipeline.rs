@@ -1,7 +1,9 @@
 use async_stream::stream;
 use chrono::Local;
 use futures_core::Stream;
+use futures_util::StreamExt;
 use lockfree_object_pool::{LinearObjectPool, LinearOwnedReusable};
+use tokio_stream::wrappers::ReceiverStream;
 
 use std::{
     sync::Arc,
@@ -9,7 +11,7 @@ use std::{
     ops::Deref,
     time::{Duration, Instant},
 };
-use tokio::net::UdpSocket;
+use tokio::{net::UdpSocket, sync::mpsc};
 
 use crate::{payload::{N_BYTE_PER_FRAME, Payload}, utils::as_mut_u8_slice};
 
@@ -62,6 +64,34 @@ impl From<UdpSocket> for MaybeMulticastReceiver {
 }
 
 pub fn recv_pkt<T>(
+    socket: MaybeMulticastReceiver,
+    buffer_size: usize,
+) -> impl Stream<Item = LinearOwnedReusable<Payload<T>>> 
+where 
+    T: Sized + Default + Copy + Send +Sync + 'static,
+    [T; N_BYTE_PER_FRAME / std::mem::size_of::<T>()]: Sized,
+{
+    let (tx, rx) = mpsc::channel(buffer_size);
+
+    // 启动一个独立的 Task，它会拼命从 Socket 读数据并处理业务逻辑
+    tokio::spawn(async move {
+        // 调用内部的逻辑流（即你原来的代码）
+        let mut internal_stream = Box::pin(recv_pkt_internal(socket));
+        
+        while let Some(payload) = internal_stream.next().await {
+            // 如果下游处理慢，数据会积压在这个 tx 队列中（直到达到 buffer_size）
+            if tx.send(payload).await.is_err() {
+                // 如果 ReceiverStream 被 drop 了，这里会退出
+                break;
+            }
+        }
+    });
+
+    // 返回经过缓冲的流
+    ReceiverStream::new(rx)
+}
+
+pub fn recv_pkt_internal<T>(
     socket: MaybeMulticastReceiver,
 ) -> impl Stream<Item = LinearOwnedReusable<Payload<T>>> 
 where T: Sized+Default+Copy+'static,
