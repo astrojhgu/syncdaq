@@ -1,3 +1,4 @@
+#![feature(generic_const_exprs)]
 use std::net::{Ipv4Addr, SocketAddrV4};
 
 use clap::Parser;
@@ -82,7 +83,7 @@ async fn main() {
     };
 
     tokio::spawn(async move {
-        let mut s = recv_pkt(socket);
+        let s = recv_pkt(socket);
         pin_mut!(s);
         while let Some(payload) = s.next().await {
             if tx.send(payload).await.is_err() {
