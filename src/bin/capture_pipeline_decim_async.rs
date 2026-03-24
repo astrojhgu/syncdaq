@@ -64,7 +64,7 @@ async fn main() {
 
     let socket = UdpSocket::bind(&addr).await.unwrap().into();
     
-    let s = recv_pkt::<Complex<i16>>(socket,8192);
+    let s = recv_pkt::<Complex<i16>>(socket,16);
     let fir_coeffs=fir_coeffs();
     let s=decim2_chained(s, &fir_coeffs, &args.bit_shifts);
 

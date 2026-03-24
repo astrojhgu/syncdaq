@@ -69,15 +69,15 @@ pub fn decim2(
                 };
                 let d=state.clone();
                 let fir1=fir_coeffs.clone();
-                spawn_blocking(move ||{
-                    resample2(
+                
+                resample2(
                     input_raw,
                     &mut output_raw1,
                     &fir1,
                     d.lock().unwrap().deref_mut(),
                     bit_shift,
                 );
-                }).await.expect("task failed");
+                
 
             } else {
                 break;
@@ -91,7 +91,7 @@ pub fn decim2(
                 };
                 let d=state.clone();
                 let fir1=fir_coeffs.clone();
-                spawn_blocking(move ||{
+                
                     resample2(
                     input_raw,
                     &mut output_raw2,
@@ -99,7 +99,7 @@ pub fn decim2(
                     d.lock().unwrap().deref_mut(),
                     bit_shift,
                 );
-                }).await.expect("task failed");
+                
 
             } else {
                 break;
