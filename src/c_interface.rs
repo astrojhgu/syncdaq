@@ -1,7 +1,6 @@
 #![allow(static_mut_refs)]
 
-
-use crossbeam::channel::{Receiver};
+use crossbeam::channel::Receiver;
 use lockfree_object_pool::LinearOwnedReusable;
 use num::Complex;
 
@@ -10,7 +9,6 @@ use crate::{
     payload::{Payload, n_pt_per_frame},
     sdr::Sdr,
 };
-
 
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
@@ -39,7 +37,6 @@ fn convert_simd(src: &[i16], dst: &mut [f32]) {
         dst[i] = src[i] as f32;
     }
 }
-
 
 //use sdaa_ctrl::ctrl_msg::{CtrlMsg, bcast_cmd, send_cmd};
 
@@ -72,17 +69,22 @@ pub extern "C" fn new_sdr_device(
     local_payload_port: u16,
     cfg_file: *const std::ffi::c_char,
 ) -> *mut CSdr {
-    let c_str = unsafe { std::ffi::CStr::from_ptr(cfg_file) };
     let remote_ctrl_addr = SocketAddrV4::new(Ipv4Addr::from(remote_ctrl_ip), 3000);
     let local_ctrl_addr = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), local_ctrl_port);
     let local_payload_addr =
         SocketAddrV4::new(Ipv4Addr::from(local_payload_ip), local_payload_port);
 
+    let c_str = if cfg_file.is_null() {
+        None
+    } else {
+        Some(unsafe { std::ffi::CStr::from_ptr(cfg_file) })
+    };
+
     let (sdr_dev, rx_payload) = Sdr::new(
         remote_ctrl_addr,
         local_ctrl_addr,
         local_payload_addr,
-        c_str.to_str().unwrap(),
+        c_str.map(|x| x.to_str().unwrap()),
     );
 
     Box::into_raw(Box::new(CSdr {
@@ -107,23 +109,23 @@ pub unsafe extern "C" fn free_sdr_device(csdr: *mut CSdr) {
     }
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn set_lo_freq(csdr: *mut CSdr, f_lo_mega_hz: f64) {
-    if csdr.is_null() {
-        return;
-    }
+// #[unsafe(no_mangle)]
+// pub unsafe extern "C" fn set_lo_freq(csdr: *mut CSdr, f_lo_mega_hz: f64) {
+//     if csdr.is_null() {
+//         return;
+//     }
 
-    let obj = unsafe { &mut *csdr };
-    //obj.tx_cmd.send(DdcCmd::LoCh(lo_ch as isize)).unwrap();
-    let cmd = CtrlMsg::MixerSet {
-        msg_id: 0,
-        nports: 8,
-        freq: vec![f_lo_mega_hz;8],
-        phase: vec![0.0; 8],
-        sync: 0,
-    };
-    let _reply = obj.sdr_dev.ctrl.send_cmd(cmd);
-}
+//     let obj = unsafe { &mut *csdr };
+//     //obj.tx_cmd.send(DdcCmd::LoCh(lo_ch as isize)).unwrap();
+//     let cmd = CtrlMsg::MixerSet {
+//         msg_id: 0,
+//         nports: 8,
+//         freq: vec![f_lo_mega_hz; 8],
+//         phase: vec![0.0; 8],
+//         sync: 0,
+//     };
+//     let _reply = obj.sdr_dev.ctrl.send_cmd(cmd);
+// }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fetch_data_16(csdr: *mut CSdr, buf: *mut CComplex, npt: usize) {
@@ -135,7 +137,7 @@ pub unsafe extern "C" fn fetch_data_16(csdr: *mut CSdr, buf: *mut CComplex, npt:
     let buf = unsafe { std::slice::from_raw_parts_mut(buf as *mut Complex<i16>, npt) };
     if obj.buffer.is_none() {
         obj.buffer = Some(obj.rx_payload.recv().unwrap());
-        if obj.rx_payload.len()>=16{
+        if obj.rx_payload.len() >= 16 {
             println!("almost full");
         }
         obj.cursor = 0;
@@ -151,7 +153,12 @@ pub unsafe extern "C" fn fetch_data_16(csdr: *mut CSdr, buf: *mut CComplex, npt:
             continue;
         }
         let copy_len = (total - written).min(available);
-        let buf_ci16=unsafe{from_raw_parts(obj.buffer.as_ref().unwrap().data.as_ptr() as *const Complex<i16>, n_pt_per_frame::<i16>())};
+        let buf_ci16 = unsafe {
+            from_raw_parts(
+                obj.buffer.as_ref().unwrap().data.as_ptr() as *const Complex<i16>,
+                n_pt_per_frame::<i16>(),
+            )
+        };
         buf[written..written + copy_len]
             .copy_from_slice(&buf_ci16[obj.cursor..obj.cursor + copy_len]);
         obj.cursor += copy_len;
@@ -279,93 +286,3 @@ pub unsafe extern "C" fn find_device(
     nresult
 }
 
-/// # Safety
-///
-/// This function should not be called before the horsemen are ready.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn make_device(ip: u32, local_port: u16) -> bool {
-    let ip = Ipv4Addr::from(ip);
-    let addr = SocketAddrV4::new(ip, 3000);
-
-    let local_addr = format!("0.0.0.0:{local_port}");
-
-    let cmd = CtrlMsg::Init {
-        msg_id: 0,
-        reserved_zeros: 0,
-    };
-    let summary = send_cmd(cmd, &[addr], &local_addr, Some(Duration::from_secs(5)), 1);
-
-    println!("{summary:?}");
-
-    // if summary.normal_reply.len() != 1 {
-    //     return false;
-    // }
-    let cmd = CtrlMsg::Sync { msg_id: 0 };
-    let _summary = send_cmd(cmd, &[addr], local_addr, Some(Duration::from_secs(5)), 1);
-
-    // if summary.normal_reply.len() != 1 {
-    //     return false;
-    // }
-
-    true
-}
-
-/// # Safety
-///
-/// This function should not be called before the horsemen are ready.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn unmake_device(ip: u32, local_port: u16) -> bool {
-    let ip = Ipv4Addr::from(ip);
-    let addr = SocketAddrV4::new(ip, 3000);
-
-    let local_addr = format!("0.0.0.0:{local_port}");
-
-    let cmd = CtrlMsg::StreamStop { msg_id: 0 };
-
-    let summary = send_cmd(cmd, &[addr], &local_addr, Some(Duration::from_secs(5)), 1);
-    if summary.normal_reply.len() != 1 {
-        return false;
-    }
-
-    true
-}
-
-/// # Safety
-///
-/// This function should not be called before the horsemen are ready.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn start_stream(ip: u32, local_port: u16) -> bool {
-    let ip = Ipv4Addr::from(ip);
-    let addr = SocketAddrV4::new(ip, 3000);
-
-    let local_addr = format!("0.0.0.0:{local_port}");
-
-    let cmd: CtrlMsg = CtrlMsg::StreamStart { msg_id: 0 };
-
-    let summary = send_cmd(cmd, &[addr], &local_addr, Some(Duration::from_secs(5)), 1);
-    if summary.normal_reply.len() != 1 {
-        return false;
-    }
-
-    true
-}
-
-/// # Safety
-///
-/// This function should not be called before the horsemen are ready.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn stop_stream(ip: u32, local_port: u16) -> bool {
-    let ip = Ipv4Addr::from(ip);
-    let addr = SocketAddrV4::new(ip, 3000);
-
-    let local_addr = format!("0.0.0.0:{local_port}");
-
-    let cmd: CtrlMsg = CtrlMsg::StreamStop { msg_id: 0 };
-
-    let summary = send_cmd(cmd, &[addr], &local_addr, Some(Duration::from_secs(5)), 1);
-    if summary.normal_reply.len() != 1 {
-        return false;
-    }
-
-    true
-}

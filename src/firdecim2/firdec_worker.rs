@@ -1,8 +1,5 @@
-use super::{I32s, F32s, LANES8, LANES16};
+use super::{F32s, I16s, I32s, LANES8, LANES16};
 use std::simd::{Simd, StdFloat, num::SimdInt, simd_swizzle};
-
-
-
 
 pub fn resample2_plain(
     input: &[i16],
@@ -23,20 +20,20 @@ pub fn resample2_plain(
         .collect();
     //println!("coeff: {:?}", fir_coeffs_full);
     let n_full_taps = fir_coeffs_full.len();
-    let n_input = input.len()/2;//in complex samples
+    let n_input = input.len() / 2; //in complex samples
     let n_old_state = n_full_taps - 1;
 
     // --- 断言校验 ---
     assert!(
-        state.len()/2 >= n_old_state + n_input,//in complex samples
+        state.len() / 2 >= n_old_state + n_input, //in complex samples
         "状态空间不足以容纳历史数据和当前输入"
     );
     let n_output = n_input / 2;
-    assert_eq!(output.len()/2, n_output, "输出长度必须是输入长度的一半");// in complex samples
+    assert_eq!(output.len() / 2, n_output, "输出长度必须是输入长度的一半"); // in complex samples
     assert_eq!(n_input % 2, 0, "输入长度必须是2的倍数以进行下采样");
 
     // 2. 将输入加载到 state 缓冲区（紧随历史数据之后）
-    state[n_old_state*2..n_old_state*2 + n_input*2].copy_from_slice(input);
+    state[n_old_state * 2..n_old_state * 2 + n_input * 2].copy_from_slice(input);
 
     // 3. 滤波与下采样
     // 这里的 i 是输入索引，由于是 1/2 下采样，我们每次跳 2 个样本
@@ -45,7 +42,7 @@ pub fn resample2_plain(
         let mut acc_im = 0i32;
 
         // 滑动窗口起始点
-        let window: &[i16] = &state[i * 4..i * 4 + n_full_taps*2]; // 每个复数占 2 个 i16
+        let window: &[i16] = &state[i * 4..i * 4 + n_full_taps * 2]; // 每个复数占 2 个 i16
 
         for (sample, &coeff) in window.chunks(2).zip(fir_coeffs_full.iter()) {
             acc_re += (sample[0] as i32) * (coeff as i32);
@@ -54,12 +51,12 @@ pub fn resample2_plain(
 
         // 缩放并转回 i16
         //output[i] = Complex::new((acc_re >> bit_shift) as i16, (acc_im >> bit_shift) as i16);
-        output[i*2] = (acc_re >> bit_shift) as i16; // I
-        output[i*2 + 1] = (acc_im >> bit_shift) as i16; // Q
+        output[i * 2] = (acc_re >> bit_shift) as i16; // I
+        output[i * 2 + 1] = (acc_im >> bit_shift) as i16; // Q
     }
 
     // 4. 更新状态：将本次输入的末尾部分移至 state 开头，供下次迭代使用
-    state.copy_within(n_input*2..n_input*2 + n_old_state*2, 0);
+    state.copy_within(n_input * 2..n_input * 2 + n_old_state * 2, 0);
 }
 
 #[inline(always)]
@@ -142,11 +139,257 @@ fn extract_even_iq(src: &[i16]) -> Simd<i32, LANES16> {
 }
 
 
+#[inline(always)]
+pub fn fir_symmetric_full_rate_plain(
+    input: &[i16],
+    output: &mut [i16],
+    coeffs: &[i16], // 从中心向外
+    state: &mut [i16],
+    bit_shift: u32,
+) {
+    assert_eq!(input.len(), output.len());
+
+    let m_half = coeffs.len();          // M
+    let n_full_taps = m_half * 2;       // 2M
+    let n_input = input.len() / 2;      // complex samples
+    let n_output = output.len() / 2;
+
+    assert_eq!(n_input, n_output);
+    assert!(m_half > 0);
+
+    let n_old_state = n_full_taps - 1;
+
+    // 拼接 state
+    state[n_old_state * 2..n_old_state * 2 + input.len()]
+        .copy_from_slice(input);
+
+    assert_eq!(
+        state.len(),
+        n_old_state * 2 + input.len(),
+        "状态空间不足"
+    );
+
+    for n in 0..n_output {
+
+        let center = n + m_half - 1; // 对齐到 FIR 中心左侧
+
+        let mut acc_re: i32 = 0;
+        let mut acc_im: i32 = 0;
+
+        for k in 0..m_half {
+            // 对称点：x[n-k] 和 x[n+k+1]
+            let left_idx  = (center - k) * 2;
+            let right_idx = (center + k + 1) * 2;
+
+            let re = state[left_idx] as i32 + state[right_idx] as i32;
+            let im = state[left_idx + 1] as i32 + state[right_idx + 1] as i32;
+
+            let c = coeffs[k] as i32;
+
+            acc_re += re * c;
+            acc_im += im * c;
+        }
+
+        output[2 * n]     = (acc_re >> bit_shift) as i16;
+        output[2 * n + 1] = (acc_im >> bit_shift) as i16;
+    }
+
+    // 更新 state
+    state.copy_within(input.len()..input.len() + n_old_state * 2, 0);
+}
+
+#[inline(always)]
+fn extract_i(src: &[i16]) -> Simd<i32, LANES16> {
+    let s = Simd::<i16, 32>::from_slice(&src[0..32]);
+    let picked = simd_swizzle!(
+        s,
+        [0, 2, 4, 6, 8, 10, 12, 14,
+         16, 18, 20, 22, 24, 26, 28, 30]
+    );
+    picked.cast::<i32>()
+}
+
+#[inline(always)]
+fn extract_q(src: &[i16]) -> Simd<i32, LANES16> {
+    let s = Simd::<i16, 32>::from_slice(&src[0..32]);
+    let picked = simd_swizzle!(
+        s,
+        [1, 3, 5, 7, 9, 11, 13, 15,
+         17, 19, 21, 23, 25, 27, 29, 31]
+    );
+    picked.cast::<i32>()
+}
+
+
+
+#[inline(always)]
+pub fn fir_symmetric_full_rate(
+    input: &[i16],
+    output: &mut [i16],
+    coeffs: &[i16], // 从中心向外
+    state: &mut [i16],
+    bit_shift: u32,
+) {
+    const LANES: usize = 16;
+    type I32s = Simd<i32, LANES>;
+    type I16s = Simd<i16, LANES>;
+
+    assert_eq!(input.len(), output.len());
+
+    let m_half = coeffs.len();
+    let n_full_taps = m_half * 2;
+
+    let n_input = input.len() / 2;
+    let n_output = output.len() / 2;
+
+    assert_eq!(n_input, n_output);
+    assert!(m_half > 0);
+
+    let n_old_state = n_full_taps - 1;
+
+    assert_eq!(
+        state.len(),
+        n_old_state * 2 + input.len(),
+        "状态空间不足"
+    );
+
+    // --- 拼接 state ---
+    state[n_old_state * 2..n_old_state * 2 + input.len()]
+        .copy_from_slice(input);
+
+    
+
+    // --- SIMD 系数 ---
+    let coeffs_i32: Vec<I32s> =
+        coeffs.iter().map(|&c| I32s::splat(c as i32)).collect();
+
+    let shift_vec = I32s::splat(bit_shift as i32);
+
+    // --- 主循环：每次处理 16 个复数 ---
+    for j in 0..(n_output / LANES) {
+
+        let base_n = j * LANES;
+
+        let mut acc_i = I32s::splat(0);
+        let mut acc_q = I32s::splat(0);
+
+        // FIR 累加
+        for k in 0..m_half {
+
+            // 对齐中心（和 plain 版本完全一致）
+            let center = base_n + m_half - 1;
+
+            let left  = (center - k) * 2;
+            let right = (center + k + 1) * 2;
+
+            // SIMD load
+            let li = extract_i(&state[left..]);
+            let lq = extract_q(&state[left..]);
+
+            let ri = extract_i(&state[right..]);
+            let rq = extract_q(&state[right..]);
+
+            let c = coeffs_i32[k];
+
+            acc_i += (li + ri) * c;
+            acc_q += (lq + rq) * c;
+        }
+
+        // --- shift ---
+        let out_i: I16s = (acc_i >> shift_vec).cast();
+        let out_q: I16s = (acc_q >> shift_vec).cast();
+
+        // --- 写回（interleave）---
+        for lane in 0..LANES {
+            let idx = 2 * (base_n + lane);
+            output[idx]     = out_i[lane];
+            output[idx + 1] = out_q[lane];
+        }
+    }
+
+    // --- 更新 state ---
+    state.copy_within(input.len()..input.len() + n_old_state * 2, 0);
+}
+
+
+/*
+#[inline(always)]
+pub fn fir_symmetric_full_rate(
+    input: &[i16],
+    output: &mut [i16],
+    coeffs: &[i16], 
+    state: &mut [i16],
+    bit_shift: u32,
+) {
+    let m_half = coeffs.len();
+    let n_full_taps = m_half * 2;
+    let n_old_state_elems = (n_full_taps - 1) * 2;
+    let n_input_elems = input.len();
+
+    // --- 严格长度校验 ---
+    assert_eq!(state.len(), n_old_state_elems + n_input_elems);
+    state[n_old_state_elems..].copy_from_slice(input);
+
+    let coeffs_i32: Vec<I32s> = coeffs.iter().map(|&c| I32s::splat(c as i32)).collect();
+    let shift_vec = I32s::splat(bit_shift as i32);
+
+    // 每次处理 16 个 i16 (即 8 个 IQ 对)
+    // 使用 step_by(16)
+    for base_idx in (0..n_input_elems).step_by(LANES16) {
+        let mut acc0 = I32s::splat(0);
+        let mut acc1 = I32s::splat(0);
+
+        for k in 0..m_half {
+            let c = coeffs_i32[k];
+            
+            // 对应 plain 逻辑：left = (i+k)*2, right = (i + n_full - 1 - k)*2
+            // 这里我们直接按 i16 索引操作
+            let left_idx = base_idx + k * 2;
+            let right_idx = base_idx + (n_full_taps - 1 - k) * 2;
+
+            // --- 安全加载策略 ---
+            // 只有当索引 + 16 会超过 state.len() 时才需要特殊处理
+            let l_vec = if left_idx + LANES16 <= state.len() {
+                I16s::from_slice(&state[left_idx..left_idx + LANES16])
+            } else {
+                // 这种边界情况在精确长度下只会发生在 right_idx，
+                // 但为了严谨，我们处理剩余部分
+                load_partial(&state, left_idx)
+            };
+
+            let r_vec = if right_idx + LANES16 <= state.len() {
+                I16s::from_slice(&state[right_idx..right_idx + LANES16])
+            } else {
+                load_partial(&state, right_idx)
+            };
+
+            let sum = l_vec.cast::<i32>() + r_vec.cast::<i32>();
+            
+            if k % 2 == 0 { acc0 += sum * c; } else { acc1 += sum * c; }
+        }
+
+        let res = (acc0 + acc1) >> shift_vec;
+        output[base_idx..base_idx + LANES16].copy_from_slice(res.cast::<i16>().as_array());
+    }
+
+    state.copy_within(n_input_elems..n_input_elems + n_old_state_elems, 0);
+}
+
+// 辅助函数：处理末尾不满 16 个元素的加载，防止越界
+#[inline(always)]
+fn load_partial(slice: &[i16], start: usize) -> I16s {
+    let mut tmp = [0i16; LANES16];
+    let len = slice.len() - start;
+    tmp[..len].copy_from_slice(&slice[start..]);
+    I16s::from_array(tmp)
+}
+*/
+
 #[cfg(test)]
 mod tests {
     use super::resample2_plain;
     //use crate::fir;
-    use super::super::{fir_coeffs::fir_coeffs};
+    use super::super::fir_coeffs::fir_half_band_coeffs;
     //use num::Complex;
     //use num::traits::FloatConst;
     //use num::traits::Zero;
@@ -154,11 +397,9 @@ mod tests {
     //use std::io::Write;
     const N_BATCH: usize = 512;
 
-    
-
     #[test]
     fn unit_pulse_complex() {
-        let fir_coeffs = fir_coeffs(); // 假设这是半带滤波器的前一半系数（含中心点）
+        let fir_coeffs = fir_half_band_coeffs(); // 假设这是半带滤波器的前一半系数（含中心点）
 
         // 生成完整的滤波器系数用于比对
         // 注意：半带滤波器的偶数项（除了中心点）通常为 0
@@ -214,11 +455,10 @@ mod tests {
             });
     }
 
-    
     #[test]
     fn test_segmented_consistency() {
         // 1. 准备参数
-        let coeff = fir_coeffs();
+        let coeff = fir_half_band_coeffs();
         let n_half_taps = coeff.len();
         let m_half = n_half_taps - 1;
         let n_old_state = 2 * m_half;
@@ -274,5 +514,4 @@ mod tests {
         }
         println!("分段等效性测试通过！");
     }
-
 }

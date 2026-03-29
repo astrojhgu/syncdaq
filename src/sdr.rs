@@ -11,9 +11,10 @@ use serde_yaml::from_reader;
 use crossbeam::channel::{Receiver, bounded};
 use lockfree_object_pool::LinearOwnedReusable;
 
-
 use crate::{
-    ctrl_msg::{CmdReplySummary, CtrlMsg, send_cmd}, payload::{Payload, N_BYTE_PER_FRAME}, pipeline::recv_pkt
+    ctrl_msg::{CmdReplySummary, CtrlMsg, send_cmd},
+    payload::{N_BYTE_PER_FRAME, Payload},
+    pipeline::recv_pkt,
 };
 
 pub struct SdrCtrl {
@@ -53,11 +54,11 @@ impl SdrCtrl {
                 msg_id: 0,
                 nports: 8,
                 freq: vec![-freq_mega_hz; 8],
-                phase: vec![0.0;8],
+                phase: vec![0.0; 8],
                 sync: sync,
             };
             self.send_cmd(cmd)
-        }else{
+        } else {
             panic!()
         }
     }
@@ -96,19 +97,22 @@ impl Sdr {
         remote_ctrl_addr: SocketAddrV4,
         local_ctrl_addr: SocketAddrV4,
         local_payload_addr: SocketAddrV4,
-        init_file: P,
+        init_file: Option<P>,
     ) -> (Sdr, Receiver<LinearOwnedReusable<Payload<T>>>)
-    where P: std::fmt::Debug+AsRef<Path>,
-    [T; N_BYTE_PER_FRAME/std::mem::size_of::<T>()]: Sized,
-    T: Sized+Default+Copy+Send+Sync+'static,
-     {
+    where
+        P: std::fmt::Debug + AsRef<Path>,
+        [T; N_BYTE_PER_FRAME / std::mem::size_of::<T>()]: Sized,
+        T: Sized + Default + Copy + Send + Sync + 'static,
+    {
         let ctrl = SdrCtrl {
             remote_ctrl_addr,
             local_ctrl_addr,
         };
 
-        println!("init file: {init_file:?}");
-        ctrl.init_device(init_file);
+        if let Some(init_file) = init_file {
+            println!("init file: {init_file:?}");
+            ctrl.init_device(init_file);
+        }
 
         let payload_socket =
             UdpSocket::bind(local_payload_addr).expect("failed to bind payload socket");
@@ -121,14 +125,13 @@ impl Sdr {
             1,
         );
         let (tx_payload, rx_payload) = bounded::<LinearOwnedReusable<Payload<T>>>(8192);
-        let rx_thread =
-            std::thread::spawn(|| recv_pkt(payload_socket.into(), tx_payload));
+        let rx_thread = std::thread::spawn(|| recv_pkt(payload_socket.into(), tx_payload));
         (
             Sdr {
                 rx_thread: Some(rx_thread),
                 ctrl,
             },
-            rx_payload
+            rx_payload,
         )
     }
 }

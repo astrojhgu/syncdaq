@@ -5,7 +5,7 @@ use std::{fs::File, io::Write, net::UdpSocket};
 use clap::Parser;
 use crossbeam::channel::unbounded;
 use syncdaq::{
-    firdecim2::{decim_pipeline::start_decim_pipeline_chain, fir_coeffs::fir_coeffs}, payload::Payload, pipeline::recv_pkt, utils::{as_u8_slice, set_recv_buffer_size}
+    firdecim2::{decim_pipeline::{start_decim_pipeline_chain, start_fir_pipeline}, fir_coeffs::{fir_anti_aliasing_coeffs, fir_half_band_coeffs}}, payload::Payload, pipeline::recv_pkt, utils::{as_u8_slice, set_recv_buffer_size}
 };
 
 #[derive(Parser, Debug)]
@@ -38,6 +38,9 @@ struct Args {
 
     #[clap(short = 's', long = "shift", num_args(1..), value_name = "bit shift for each stage")]
     bit_shifts: Vec<u32>,
+
+    #[clap(short = 't', long = "ashift", num_args(1..), value_name = "bit shift for anti-aliasing stage")]
+    anti_aliasing_shift: Option<u32>,
 }
 
 fn main() {
@@ -62,9 +65,17 @@ fn main() {
     });
     let mut npkts_full_dump = 0;
     let mut total_npkts_received = 0;
-    let fir_coeffs=fir_coeffs();
+    let fir_coeffs=fir_half_band_coeffs();
 
     let (_th, rx)=start_decim_pipeline_chain(rx, &fir_coeffs, &args.bit_shifts);
+    let rx=if let Some(anti_aliasing_shift) = args.anti_aliasing_shift {
+        let anti_aliasing_coeffs = fir_anti_aliasing_coeffs();
+        let (tx1, rx1) = unbounded::<LinearOwnedReusable<Payload<Complex<i16>>>>();
+        let _ = start_fir_pipeline(rx, tx1, &anti_aliasing_coeffs, anti_aliasing_shift);
+        rx1
+    } else {
+        rx
+    };
 
     loop {
         let payload = rx.recv().expect("failed to recv payload");

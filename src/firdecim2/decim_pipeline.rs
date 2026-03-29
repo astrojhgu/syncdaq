@@ -4,10 +4,12 @@ use crossbeam::channel::{Receiver, Sender};
 use lockfree_object_pool::{LinearObjectPool, LinearOwnedReusable};
 use num::{Complex, Zero};
 
+use crate::firdecim2::firdec_worker::fir_symmetric_full_rate;
+
 use super::{
+    super::payload::{N_BYTE_PER_FRAME, Payload},
     I32s,
     firdec_worker::resample2,
-    super::payload::{Payload, N_BYTE_PER_FRAME},
 };
 
 //use core_affinity;
@@ -33,7 +35,7 @@ pub fn start_decim_pipeline(
     let fir_coeffs = fir_coeffs.to_vec();
     let _fir_coeffs_i32: Vec<std::simd::Simd<i32, 16>> =
         fir_coeffs.iter().map(|&c| I32s::splat(c as i32)).collect();
-    let patch_len= N_BYTE_PER_FRAME/ std::mem::size_of::<Complex<DTYPE>>();
+    let patch_len = N_BYTE_PER_FRAME / std::mem::size_of::<Complex<DTYPE>>();
 
     std::thread::spawn(move || {
         //pin_current_thread();
@@ -55,7 +57,10 @@ pub fn start_decim_pipeline(
         loop {
             let mut output = pool.pull_owned();
             let output_raw = unsafe {
-                std::slice::from_raw_parts_mut(output.data.as_mut_ptr() as *mut DTYPE, patch_len * 2)
+                std::slice::from_raw_parts_mut(
+                    output.data.as_mut_ptr() as *mut DTYPE,
+                    patch_len * 2,
+                )
             };
             if let Ok(input) = recv.recv() {
                 let input_raw = unsafe {
@@ -79,7 +84,7 @@ pub fn start_decim_pipeline(
                 let input_raw = unsafe {
                     std::slice::from_raw_parts(input.data.as_ptr() as *const DTYPE, patch_len * 2)
                 };
-                
+
                 resample2(
                     input_raw,
                     &mut output_raw[patch_len..],
@@ -115,26 +120,76 @@ pub fn start_decim_pipeline_chain(
         let (send1, mut recv1) = crossbeam::channel::bounded::<
             lockfree_object_pool::LinearOwnedReusable<Payload<Complex<DTYPE>>>,
         >(32);
-        result.push(start_decim_pipeline(
-            recv,
-            send1,
-            fir_coeffs,
-            bit_shifts[0],
-        ));
+        result.push(start_decim_pipeline(recv, send1, fir_coeffs, bit_shifts[0]));
 
         for i in 1..n_cascades {
             let (send1, recv2) = crossbeam::channel::bounded::<
                 lockfree_object_pool::LinearOwnedReusable<Payload<Complex<DTYPE>>>,
             >(4);
             let recv = std::mem::replace(&mut recv1, recv2);
-            result.push(start_decim_pipeline(
-                recv,
-                send1,
-                fir_coeffs,
-                bit_shifts[i],
-            ));
+            result.push(start_decim_pipeline(recv, send1, fir_coeffs, bit_shifts[i]));
         }
         (result, recv1)
     }
 }
 
+pub fn start_fir_pipeline(
+    recv: Receiver<LinearOwnedReusable<Payload<Complex<DTYPE>>>>,
+    send: Sender<LinearOwnedReusable<Payload<Complex<DTYPE>>>>,
+    fir_coeffs: &[DTYPE],
+    bit_shift: u32,
+) -> JoinHandle<()> {
+    // Implementation of the decimation pipeline start logic
+    let fir_coeffs = fir_coeffs.to_vec();
+    let _fir_coeffs_i32: Vec<std::simd::Simd<i32, 16>> =
+        fir_coeffs.iter().map(|&c| I32s::splat(c as i32)).collect();
+    let patch_len = N_BYTE_PER_FRAME / std::mem::size_of::<Complex<DTYPE>>();
+
+    std::thread::spawn(move || {
+        //pin_current_thread();
+        let ntaps = fir_coeffs.len();
+        let state_len = ntaps * 2 -1+ patch_len; // 2:1 decimation, so input is 2x output
+        let mut state = vec![Complex::<DTYPE>::zero(); state_len];
+        let state_raw = unsafe {
+            std::slice::from_raw_parts_mut(state.as_mut_ptr() as *mut DTYPE, state_len * 2)
+        };
+
+        let pool: Arc<LinearObjectPool<Payload<Complex<DTYPE>>>> = Arc::new(LinearObjectPool::new(
+            move || {
+                //eprint!("o");
+                Payload::<Complex<DTYPE>>::default()
+            },
+            |_v| {},
+        ));
+
+        loop {
+            let mut output = pool.pull_owned();
+            let mut output_raw = unsafe {
+                std::slice::from_raw_parts_mut(
+                    output.data.as_mut_ptr() as *mut DTYPE,
+                    patch_len * 2,
+                )
+            };
+            if let Ok(input) = recv.recv() {
+                let input_raw = unsafe {
+                    std::slice::from_raw_parts(input.data.as_ptr() as *const DTYPE, patch_len * 2)
+                };
+
+                output.copy_header(&input);
+                fir_symmetric_full_rate(
+                    input_raw,
+                    &mut output_raw,
+                    &fir_coeffs,
+                    state_raw,
+                    bit_shift,
+                );
+            } else {
+                break;
+            }
+
+            if send.send(output).is_err() {
+                break;
+            }
+        }
+    })
+}

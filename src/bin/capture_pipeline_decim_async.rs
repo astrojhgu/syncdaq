@@ -15,7 +15,7 @@ use tokio::{
 use clap::Parser;
 use crossbeam::channel::unbounded;
 use syncdaq::{
-    async_pipeline::{MaybeMulticastReceiver, recv_pkt}, firdecim2::{decim_async_pipeline::decim2_chained, fir_coeffs::fir_coeffs}, payload::Payload, utils::{as_u8_slice, set_recv_buffer_size}
+    async_pipeline::{MaybeMulticastReceiver, recv_pkt}, firdecim2::{decim_async_pipeline::decim2_chained, fir_coeffs::fir_half_band_coeffs}, payload::Payload, utils::{as_u8_slice, set_recv_buffer_size}
 };
 
 #[derive(Parser, Debug)]
@@ -53,8 +53,8 @@ struct Args {
     bit_shifts: Vec<u32>,
 }
 
-//#[tokio::main]
-#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
+//#[tokio::main(flavor="current_thread")]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() {
     //let (tx,rx)=bounded(256);
     let args = Args::parse();
@@ -65,7 +65,7 @@ async fn main() {
     let socket = UdpSocket::bind(&addr).await.unwrap().into();
     
     let s = recv_pkt::<Complex<i16>>(socket,16);
-    let fir_coeffs=fir_coeffs();
+    let fir_coeffs=fir_half_band_coeffs();
     let s=decim2_chained(s, &fir_coeffs, &args.bit_shifts);
 
     pin_mut!(s);
