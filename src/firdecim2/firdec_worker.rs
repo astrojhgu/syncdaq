@@ -126,6 +126,91 @@ pub fn resample2(
     state.copy_within(n_input..n_input + n_old_state, 0);
 }
 
+
+#[inline(always)]
+pub fn resample2_gen(
+    input: &[i16],
+    output: &mut [i16],
+    coeffs: &[i16], // 现在传入完整的系数数组，不再假定偶数索引为0
+    state: &mut [i16],
+    bit_shift: u32,
+) {
+    let coeffs_i32: Vec<I32s> =
+        coeffs.iter().map(|&c| I32s::splat(c as i32)).collect();
+
+    let n_half_taps = coeffs_i32.len();
+    let m_half = n_half_taps - 1;
+    let n_input = input.len();
+    let n_output = output.len();
+    
+    // 保持原来的状态长度不变，以兼容你外层的 buffer 逻辑
+    let n_old_state = m_half * 4; 
+
+    state[n_old_state..n_old_state + n_input].copy_from_slice(input);
+
+    let shift_vec = I32s::splat(bit_shift as i32);
+
+    for j in 0..(n_output / LANES16) {
+        let out_idx = j * LANES16;
+        let state_offset = 2 * out_idx + (m_half * 2);
+
+        // --- 中心 Tap (k = 0) ---
+        // --- 中心 Tap ---
+        let mut acc0 = extract_even_iq(&state[state_offset..]) * coeffs_i32[0];
+        let mut acc1 = I32s::splat(0);
+        let mut acc2 = I32s::splat(0);
+        let mut acc3 = I32s::splat(0);
+
+        // --- 展开循环 (每步处理 4 个 tap) ---
+        let mut k = 1;
+        while k + 3 <= m_half {
+            // 第 1 组
+            let c_a = coeffs_i32[k];
+            let p_a = extract_even_iq(&state[state_offset + k * 2..]);
+            let n_a = extract_even_iq(&state[state_offset - k * 2..]);
+            acc0 += (p_a + n_a) * c_a;
+
+            // 第 2 组
+            let c_b = coeffs_i32[k + 1];
+            let p_b = extract_even_iq(&state[state_offset + (k + 1) * 2..]);
+            let n_b = extract_even_iq(&state[state_offset - (k + 1) * 2..]);
+            acc1 += (p_b + n_b) * c_b;
+
+            // 第 3 组
+            let c_c = coeffs_i32[k + 2];
+            let p_c = extract_even_iq(&state[state_offset + (k + 2) * 2..]);
+            let n_c = extract_even_iq(&state[state_offset - (k + 2) * 2..]);
+            acc2 += (p_c + n_c) * c_c;
+
+            // 第 4 组
+            let c_d = coeffs_i32[k + 3];
+            let p_d = extract_even_iq(&state[state_offset + (k + 3) * 2..]);
+            let n_d = extract_even_iq(&state[state_offset - (k + 3) * 2..]);
+            acc3 += (p_d + n_d) * c_d;
+
+            k += 4;
+        }
+
+        // --- 处理剩余的 k (0 到 3 个) ---
+        while k <= m_half {
+            let c = coeffs_i32[k];
+            let p = extract_even_iq(&state[state_offset + k * 2..]);
+            let n = extract_even_iq(&state[state_offset - k * 2..]);
+            acc0 += (p + n) * c;
+            k += 1;
+        }
+
+        // 合并所有累加器
+        let acc = acc0 + acc1 + acc2 + acc3;
+        
+        let shifted = acc >> shift_vec;
+        let out_simd: Simd<i16, LANES16> = shifted.cast::<i16>();
+        output[out_idx..out_idx + LANES16].copy_from_slice(out_simd.as_array());
+    }
+
+    state.copy_within(n_input..n_input + n_old_state, 0);
+}
+
 // 保持这个高效的 swizzle 不变，但确保它内联
 #[inline(always)]
 fn extract_even_iq(src: &[i16]) -> Simd<i32, LANES16> {

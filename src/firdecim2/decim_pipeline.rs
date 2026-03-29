@@ -9,7 +9,7 @@ use crate::firdecim2::firdec_worker::fir_symmetric_full_rate;
 use super::{
     super::payload::{N_BYTE_PER_FRAME, Payload},
     I32s,
-    firdec_worker::resample2,
+    firdec_worker::resample2 as resample2,
 };
 
 //use core_affinity;
