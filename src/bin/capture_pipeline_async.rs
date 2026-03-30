@@ -60,7 +60,7 @@ async fn main() {
     let socket = UdpSocket::bind(&addr).await.unwrap().into();
 
     //let pool1 = Arc::clone(&pool);
-    let s = recv_pkt::<u8>(socket, 256);
+    let s = recv_pkt::<u8>(socket);
 
     pin_mut!(s);
 
