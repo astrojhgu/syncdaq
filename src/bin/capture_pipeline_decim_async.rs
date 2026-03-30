@@ -16,7 +16,10 @@ use clap::Parser;
 use crossbeam::channel::unbounded;
 use syncdaq::{
     async_pipeline::{MaybeMulticastReceiver, recv_pkt},
-    firdecim2::{decim_async_pipeline::{decim2_chained, fir_pipeline}, fir_coeffs::{fir_anti_aliasing_coeffs, fir_half_band_coeffs}},
+    firdecim2::{
+        decim_async_pipeline::{decim2_chained, fir_pipeline},
+        fir_coeffs::{fir_anti_aliasing_coeffs, fir_half_band_coeffs},
+    },
     payload::Payload,
     utils::{as_u8_slice, set_recv_buffer_size},
 };
@@ -74,10 +77,10 @@ async fn main() {
     let fir_coeffs = fir_half_band_coeffs();
     let s = decim2_chained(s, &fir_coeffs, &args.bit_shifts, 16);
 
-    let s=if let Some(ashift) = args.anti_aliasing_shift {
+    let s = if let Some(ashift) = args.anti_aliasing_shift {
         let anti_aliasing_coeffs = fir_anti_aliasing_coeffs();
         fir_pipeline(s, &anti_aliasing_coeffs, ashift)
-    }else{
+    } else {
         s
     };
 
@@ -100,9 +103,6 @@ async fn main() {
     }
     let mut npkts_full_dump = 0;
     let mut total_npkts_received = 0;
-
-
-
 
     while let Some(payload) = s.next().await {
         if payload.pkt_cnt % 100000 == 0 {

@@ -189,8 +189,6 @@ pub fn fir_pipeline(
     let s = stream! {
         futures_util::pin_mut!(input);
         let mut state = vec![Complex::<i16>::zero(); state_len];
-        let state_raw =
-            unsafe { std::slice::from_raw_parts_mut(state.as_mut_ptr() as *mut i16, state_len * 2) };
         loop{
             if let Some(input) = input.next().await {
                 assert_eq!(input.data.len(), patch_len);
@@ -206,6 +204,9 @@ pub fn fir_pipeline(
                     patch_len * 2,
                 )
                 };
+
+                let state_raw =
+                    unsafe { std::slice::from_raw_parts_mut(state.as_mut_ptr() as *mut i16, state_len * 2) };
 
                 fir_symmetric_full_rate(
                     input_raw,
