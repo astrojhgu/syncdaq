@@ -93,10 +93,7 @@ fn main() {
                 dump_file = None;
                 println!("dump file saved");
 
-                println!(
-                    "pkt_cnt: {}, port_id: {}",
-                    payload.pkt_cnt, payload.port_id
-                );
+                println!("pkt_cnt: {}, port_id: {}", payload.pkt_cnt, payload.port_id);
             }
         }
 

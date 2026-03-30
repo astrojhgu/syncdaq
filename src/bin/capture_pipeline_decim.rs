@@ -5,7 +5,13 @@ use std::{fs::File, io::Write, net::UdpSocket};
 use clap::Parser;
 use crossbeam::channel::unbounded;
 use syncdaq::{
-    firdecim2::{decim_pipeline::{start_decim_pipeline_chain, start_fir_pipeline}, fir_coeffs::{fir_anti_aliasing_coeffs, fir_half_band_coeffs}}, payload::Payload, pipeline::recv_pkt, utils::{as_u8_slice, set_recv_buffer_size}
+    firdecim2::{
+        decim_pipeline::{start_decim_pipeline_chain, start_fir_pipeline},
+        fir_coeffs::{fir_anti_aliasing_coeffs, fir_half_band_coeffs},
+    },
+    payload::Payload,
+    pipeline::recv_pkt,
+    utils::{as_u8_slice, set_recv_buffer_size},
 };
 
 #[derive(Parser, Debug)]
@@ -54,7 +60,6 @@ fn main() {
     //let pool1 = Arc::clone(&pool);
     std::thread::spawn(|| recv_pkt(socket.into(), tx));
 
-
     let mut npkt_to_dump = 0;
     let mut dump_file = None;
 
@@ -65,10 +70,10 @@ fn main() {
     });
     let mut npkts_full_dump = 0;
     let mut total_npkts_received = 0;
-    let fir_coeffs=fir_half_band_coeffs();
+    let fir_coeffs = fir_half_band_coeffs();
 
-    let (_th, rx)=start_decim_pipeline_chain(rx, &fir_coeffs, &args.bit_shifts);
-    let rx=if let Some(anti_aliasing_shift) = args.anti_aliasing_shift {
+    let (_th, rx) = start_decim_pipeline_chain(rx, &fir_coeffs, &args.bit_shifts);
+    let rx = if let Some(anti_aliasing_shift) = args.anti_aliasing_shift {
         let anti_aliasing_coeffs = fir_anti_aliasing_coeffs();
         let (tx1, rx1) = unbounded::<LinearOwnedReusable<Payload<Complex<i16>>>>();
         let _ = start_fir_pipeline(rx, tx1, &anti_aliasing_coeffs, anti_aliasing_shift);
@@ -110,10 +115,7 @@ fn main() {
                 dump_file = None;
                 println!("dump file saved");
 
-                println!(
-                    "pkt_cnt: {}, port_id: {}",
-                    payload.pkt_cnt, payload.port_id
-                );
+                println!("pkt_cnt: {}, port_id: {}", payload.pkt_cnt, payload.port_id);
             }
         }
 

@@ -15,7 +15,10 @@ use tokio::{
 use clap::Parser;
 use crossbeam::channel::unbounded;
 use syncdaq::{
-    async_pipeline::{MaybeMulticastReceiver, recv_pkt}, firdecim2::{decim_async_pipeline::decim2_chained, fir_coeffs::fir_half_band_coeffs}, payload::Payload, utils::{as_u8_slice, set_recv_buffer_size}
+    async_pipeline::{MaybeMulticastReceiver, recv_pkt},
+    firdecim2::{decim_async_pipeline::{decim2_chained, fir_pipeline}, fir_coeffs::{fir_anti_aliasing_coeffs, fir_half_band_coeffs}},
+    payload::Payload,
+    utils::{as_u8_slice, set_recv_buffer_size},
 };
 
 #[derive(Parser, Debug)]
@@ -51,6 +54,9 @@ struct Args {
 
     #[clap(short = 's', long = "shift", num_args(1..), value_name = "bit shift for each stage")]
     bit_shifts: Vec<u32>,
+
+    #[clap(short = 't', long = "ashift", num_args(1..), value_name = "bit shift for anti-aliasing stage")]
+    anti_aliasing_shift: Option<u32>,
 }
 
 //#[tokio::main(flavor="current_thread")]
@@ -63,10 +69,17 @@ async fn main() {
     let buffer_size_mega_byte = args.buffer_size_mega_byte.unwrap_or(8);
 
     let socket = UdpSocket::bind(&addr).await.unwrap().into();
-    
-    let s = recv_pkt::<Complex<i16>>(socket,16);
-    let fir_coeffs=fir_half_band_coeffs();
-    let s=decim2_chained(s, &fir_coeffs, &args.bit_shifts);
+
+    let s = recv_pkt::<Complex<i16>>(socket, 16);
+    let fir_coeffs = fir_half_band_coeffs();
+    let s = decim2_chained(s, &fir_coeffs, &args.bit_shifts, 16);
+
+    let s=if let Some(ashift) = args.anti_aliasing_shift {
+        let anti_aliasing_coeffs = fir_anti_aliasing_coeffs();
+        fir_pipeline(s, &anti_aliasing_coeffs, ashift)
+    }else{
+        s
+    };
 
     pin_mut!(s);
 
@@ -88,6 +101,9 @@ async fn main() {
     let mut npkts_full_dump = 0;
     let mut total_npkts_received = 0;
 
+
+
+
     while let Some(payload) = s.next().await {
         if payload.pkt_cnt % 100000 == 0 {
             println!("cnt: {}", payload.pkt_cnt);
@@ -97,7 +113,8 @@ async fn main() {
             && payload.pkt_cnt != 0
             && c + 1 != payload.pkt_cnt
         {
-            eprintln!("dropped {}", payload.pkt_cnt - c - 1);
+            eprintln!("dropped {} {}", payload.pkt_cnt - c - 1, payload.pkt_cnt);
+            eprintln!(".");
         }
 
         old_cnt = Some(payload.pkt_cnt);

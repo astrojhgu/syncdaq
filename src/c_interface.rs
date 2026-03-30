@@ -285,4 +285,3 @@ pub unsafe extern "C" fn find_device(
     }
     nresult
 }
-

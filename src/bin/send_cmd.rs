@@ -1,7 +1,7 @@
 use clap::Parser;
-use syncdaq::ctrl_msg::{self, send_cmd, CtrlMsg};
 use serde_yaml::from_reader;
 use std::{fmt::Display, fs::File, time::Duration};
+use syncdaq::ctrl_msg::{self, CtrlMsg, send_cmd};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -50,14 +50,14 @@ impl Display for MsgError {
     }
 }
 
-
 impl std::error::Error for MsgError {}
 
-fn main()->Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let debug_level = args.debug_level;
 
-    let cmds: Vec<CtrlMsg> = from_reader(File::open(&args.cmd).expect("file not open")).expect("failed to load cmd");
+    let cmds: Vec<CtrlMsg> =
+        from_reader(File::open(&args.cmd).expect("file not open")).expect("failed to load cmd");
     for c in cmds {
         let summary = send_cmd(
             c,
@@ -67,15 +67,23 @@ fn main()->Result<(), Box<dyn std::error::Error>> {
             debug_level,
         );
 
-        for (_a,msg) in &summary.normal_reply{
-            if let ctrl_msg::CtrlMsg::QueryReply { msg_id:_, fm_ver:_, tick_cnt1, tick_cnt2, trans_state:_, locked, health:_ }=msg.clone(){
-                println!("{}", tick_cnt2-tick_cnt1);
-                if tick_cnt2-tick_cnt1!=10_000_000 || locked&0x00_00_00_0f!=0x0f{
-                    return Err(Box::new(MsgError::StatAbnormal))
+        for (_a, msg) in &summary.normal_reply {
+            if let ctrl_msg::CtrlMsg::QueryReply {
+                msg_id: _,
+                fm_ver: _,
+                tick_cnt1,
+                tick_cnt2,
+                trans_state: _,
+                locked,
+                health: _,
+            } = msg.clone()
+            {
+                println!("{}", tick_cnt2 - tick_cnt1);
+                if tick_cnt2 - tick_cnt1 != 10_000_000 || locked & 0x00_00_00_0f != 0x0f {
+                    return Err(Box::new(MsgError::StatAbnormal));
                 }
             }
         }
-        
 
         if summary.no_reply.is_empty() {
             println!("all replied");

@@ -60,9 +60,9 @@ async fn main() {
     let buffer_size_mega_byte = args.buffer_size_mega_byte.unwrap_or(8);
 
     let socket = UdpSocket::bind(&addr).await.unwrap().into();
-    
+
     //let pool1 = Arc::clone(&pool);
-    let s = recv_pkt::<u8>(socket,256);
+    let s = recv_pkt::<u8>(socket, 256);
 
     pin_mut!(s);
 

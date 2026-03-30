@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use binrw::{binrw, BinRead, BinWrite};
+use binrw::{BinRead, BinWrite, binrw};
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 
@@ -60,12 +60,12 @@ impl Display for XGbeCfg {
 #[brw(little)]
 pub enum Health {
     #[brw(magic(0x00_00_01_fe_u32))]
-    T510Health{
+    T510Health {
         rfdc_restart_cnt: u32,
         //fifo_full_cnt: u32,
         temperature: f32,
-        nports: u32,     
-        fifo_full_cnt:u32,   
+        nports: u32,
+        fifo_full_cnt: u32,
         #[br(count=nports)]
         pkt_cnt1: Vec<u64>,
         #[br(count=nports)]
@@ -74,36 +74,45 @@ pub enum Health {
         pkt_cnt2: Vec<u64>,
         #[br(count=nports)]
         axi_frame_cnt2: Vec<u64>,
-    }
+    },
 }
 
-impl Display for Health{
+impl Display for Health {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self{
-            &Health::T510Health{rfdc_restart_cnt,temperature, nports, fifo_full_cnt,ref pkt_cnt1, ref axi_frame_cnt1, ref pkt_cnt2, ref axi_frame_cnt2}=>{
+        match self {
+            &Health::T510Health {
+                rfdc_restart_cnt,
+                temperature,
+                nports,
+                fifo_full_cnt,
+                ref pkt_cnt1,
+                ref axi_frame_cnt1,
+                ref pkt_cnt2,
+                ref axi_frame_cnt2,
+            } => {
                 write!(f, "T510Health{{")?;
                 write!(f, "rfdc_restart_cnt: {}, ", rfdc_restart_cnt)?;
                 write!(f, "temperature: {} degC, ", temperature)?;
                 write!(f, "nports: {}, ", nports)?;
-                write!(f, "fifo_full_cnt: {}, ", fifo_full_cnt>>16)?;
-                write!(f, "fifo_len: {}, ", fifo_full_cnt&0xffff)?;
+                write!(f, "fifo_full_cnt: {}, ", fifo_full_cnt >> 16)?;
+                write!(f, "fifo_len: {}, ", fifo_full_cnt & 0xffff)?;
                 write!(f, "pkt_cnt1: [")?;
-                for x in pkt_cnt1{
+                for x in pkt_cnt1 {
                     write!(f, "{}, ", x)?;
                 }
                 write!(f, "], ")?;
                 write!(f, "axi_frame_cnt1: [")?;
-                for x in axi_frame_cnt1{
+                for x in axi_frame_cnt1 {
                     write!(f, "{}, ", x)?;
                 }
                 write!(f, "], ")?;
                 write!(f, "pkt_cnt2: [")?;
-                for x in pkt_cnt2{
+                for x in pkt_cnt2 {
                     write!(f, "{}, ", x)?;
                 }
                 write!(f, "], ")?;
                 write!(f, "axi_frame_cnt2: [")?;
-                for x in axi_frame_cnt2{
+                for x in axi_frame_cnt2 {
                     write!(f, "{}, ", x)?;
                 }
                 write!(f, "]")?;
@@ -213,10 +222,7 @@ pub enum CtrlMsg {
     #[brw(magic(0xff_00_02_05_u32))]
     StreamStopReply { msg_id: u32 },
     #[brw(magic(0x06_u32))]
-    BitShift {
-        msg_id: u32,
-        shift_bits: u32,
-    },
+    BitShift { msg_id: u32, shift_bits: u32 },
     #[brw(magic(0xff_00_00_06_u32))]
     BitShiftReply { msg_id: u32 },
     #[brw(magic(0x07_u32))]
@@ -230,33 +236,35 @@ pub enum CtrlMsg {
     InitReply { msg_id: u32 },
 
     #[brw(magic(0x0a_u32))]
-    XGbeCfgSingle{msg_id: u32, port_id: u32, cfg: XGbeCfg},
+    XGbeCfgSingle {
+        msg_id: u32,
+        port_id: u32,
+        cfg: XGbeCfg,
+    },
 
     #[brw(magic(0xff_00_00_0a_u32))]
-    XGbeCfgSingleReply{msg_id: u32},
+    XGbeCfgSingleReply { msg_id: u32 },
 
     #[brw(magic(0x0b_u32))]
-    XGbeCfgQuery{msg_id: u32},
+    XGbeCfgQuery { msg_id: u32 },
 
     #[brw(magic(0xff_00_00_0b_u32))]
-    XGbeCfgQueryReply{msg_id: u32, 
-        nports: u32, 
+    XGbeCfgQueryReply {
+        msg_id: u32,
+        nports: u32,
         #[br(count=nports)]
-        cfg:Vec<XGbeCfg>
+        cfg: Vec<XGbeCfg>,
     },
     #[brw(magic(0x00_00_00_0c_u32))]
-    SetClk{
+    SetClk {
         msg_id: u32,
         clk_src: u32,
         pps_src: u32,
     },
     #[brw(magic(0xff_00_00_0c_u32))]
-    SetClkReply{
-        msg_id: u32,
-        clk_state: u32,
-    },
+    SetClkReply { msg_id: u32, clk_state: u32 },
     #[brw(magic(0x00_00_00_0d_u32))]
-    MixerSet{
+    MixerSet {
         msg_id: u32,
         nports: u32,
         sync: u32,
@@ -266,26 +274,15 @@ pub enum CtrlMsg {
         phase: Vec<f64>,
     },
     #[brw(magic(0xff_00_00_0d_u32))]
-    MixerSetReply{
-        msg_id: u32,
-    },
+    MixerSetReply { msg_id: u32 },
     #[brw(magic(0x00_00_00_0e_u32))]
-    PortMask{
-        msg_id: u32, 
-        mask: u32,
-    },
+    PortMask { msg_id: u32, mask: u32 },
     #[brw(magic(0xff_00_00_0e_u32))]
-    PortMaskReply{
-        msg_id: u32, 
-    },
+    PortMaskReply { msg_id: u32 },
     #[brw(magic(0x00_00_00_ff_u32))]
-    Reboot{
-        msg_id: u32, 
-    },
+    Reboot { msg_id: u32 },
     #[brw(magic(0xff_00_00_ff_u32))]
-    RebootReply{
-        msg_id: u32, 
-    },
+    RebootReply { msg_id: u32 },
 }
 
 impl Display for CtrlMsg {
@@ -298,7 +295,8 @@ impl Display for CtrlMsg {
                 len: _,
                 description,
             } => {
-                let desc = String::from_utf8(description.clone()).expect("failed to convert to utf8 str");
+                let desc =
+                    String::from_utf8(description.clone()).expect("failed to convert to utf8 str");
                 writeln!(
                     f,
                     "InvalidMsg:{{ msg_id: {msg_id}, err_code: {err_code}, desc: {desc} }}"
@@ -316,21 +314,24 @@ impl Display for CtrlMsg {
                 locked,
                 health,
             } => {
-                let day:u32     = (fm_ver >> 27) & 0x1F;
-                let month:u32   = (fm_ver >> 23) & 0x0F;
-                let year:u32    = 2000+((fm_ver >> 17) & 0x3F);
-                let hour:u32    = (fm_ver >> 12) & 0x1F;
-                let minute:u32  = (fm_ver >> 6)  & 0x3F;
-                let second:u32  = fm_ver & 0x3F;
+                let day: u32 = (fm_ver >> 27) & 0x1F;
+                let month: u32 = (fm_ver >> 23) & 0x0F;
+                let year: u32 = 2000 + ((fm_ver >> 17) & 0x3F);
+                let hour: u32 = (fm_ver >> 12) & 0x1F;
+                let minute: u32 = (fm_ver >> 6) & 0x3F;
+                let second: u32 = fm_ver & 0x3F;
 
-                write!(f, "QueryReply{{msg_id: {msg_id}, fm_ver: 0x{fm_ver:x} ({year}-{month:02}-{day:02} {hour}:{minute}:{second:02}), tick_cnt1: {tick_cnt1}, tick_cnt2: {tick_cnt2}, trans_state: 0x{trans_state:x}, locked: 0x{locked:x}, Health: {health}")?;
+                write!(
+                    f,
+                    "QueryReply{{msg_id: {msg_id}, fm_ver: 0x{fm_ver:x} ({year}-{month:02}-{day:02} {hour}:{minute}:{second:02}), tick_cnt1: {tick_cnt1}, tick_cnt2: {tick_cnt2}, trans_state: 0x{trans_state:x}, locked: 0x{locked:x}, Health: {health}"
+                )?;
                 writeln!(f, "}}")?;
-                if *locked & 0x00_00_00_0f!=0x0f{
+                if *locked & 0x00_00_00_0f != 0x0f {
                     writeln!(f, "Lock stat abnormal!")?;
                 }
-                if tick_cnt2-tick_cnt1!=10_000_000{
+                if tick_cnt2 - tick_cnt1 != 10_000_000 {
                     writeln!(f, "Warning, tick cnt diff != 10M ")
-                }else{
+                } else {
                     writeln!(f, "tick cnt diff OK")
                 }
             }
@@ -389,7 +390,10 @@ impl Display for CtrlMsg {
                 len: _,
                 payload,
             } => {
-                write!(f, "I2CWriteReg{{ msg_id: {msg_id}, dev_addr: 0x{dev_addr:x}, reg_addr: 0x{reg_addr:x}")?;
+                write!(
+                    f,
+                    "I2CWriteReg{{ msg_id: {msg_id}, dev_addr: 0x{dev_addr:x}, reg_addr: 0x{reg_addr:x}"
+                )?;
                 for &x in payload {
                     write!(f, " {x:02x}")?;
                 }
@@ -432,7 +436,10 @@ impl Display for CtrlMsg {
                 reg_addr,
                 nbytes,
             } => {
-                writeln!(f, "I2CReadReg{{msg_id: {msg_id}, dev_addr: 0x{dev_addr:x}, reg_addr: 0x{reg_addr:x} nbytes:{nbytes}}}")
+                writeln!(
+                    f,
+                    "I2CReadReg{{msg_id: {msg_id}, dev_addr: 0x{dev_addr:x}, reg_addr: 0x{reg_addr:x} nbytes:{nbytes}}}"
+                )
             }
             CtrlMsg::I2CReadRegReply {
                 msg_id,
@@ -461,18 +468,12 @@ impl Display for CtrlMsg {
             CtrlMsg::StreamStopReply { msg_id } => {
                 writeln!(f, "StreamStopReply{{msg_id: {msg_id}}}")
             }
-            CtrlMsg::BitShift {
-                msg_id,
-                shift_bits
-            } => {
+            CtrlMsg::BitShift { msg_id, shift_bits } => {
                 write!(f, "Bitshift{{ msg_id: {msg_id} shift_bits:{shift_bits},")?;
                 writeln!(f, "}}")
             }
-            CtrlMsg::BitShiftReply { msg_id} => {
-                writeln!(
-                    f,
-                    "Bitshift{{msg_id: {msg_id}}}"
-                )
+            CtrlMsg::BitShiftReply { msg_id } => {
+                writeln!(f, "Bitshift{{msg_id: {msg_id}}}")
             }
             CtrlMsg::PwrCtrl { msg_id, op_code } => {
                 writeln!(f, "PwrCtrl{{msg_id: {msg_id}, op_code: {op_code}}}")
@@ -492,20 +493,34 @@ impl Display for CtrlMsg {
                 writeln!(f, "InitReply {{msg_id: {msg_id}}}")
             }
 
-            CtrlMsg::XGbeCfgSingle { msg_id, port_id, cfg }=>{
-                writeln!(f, "XgbeCfgSingle {{msg_id: {msg_id}, port_id: {port_id}, cfg: {cfg}}}")
+            CtrlMsg::XGbeCfgSingle {
+                msg_id,
+                port_id,
+                cfg,
+            } => {
+                writeln!(
+                    f,
+                    "XgbeCfgSingle {{msg_id: {msg_id}, port_id: {port_id}, cfg: {cfg}}}"
+                )
             }
 
-            CtrlMsg::XGbeCfgSingleReply { msg_id }=>{
+            CtrlMsg::XGbeCfgSingleReply { msg_id } => {
                 writeln!(f, "XgbeCfgSingleReply {{msg_id: {msg_id}}}")
             }
 
-            CtrlMsg::XGbeCfgQuery { msg_id }=>{
+            CtrlMsg::XGbeCfgQuery { msg_id } => {
                 writeln!(f, "XgbeCfgQuery {{msg_id: {msg_id}}}")
             }
 
-            CtrlMsg::XGbeCfgQueryReply { msg_id, nports, cfg }=>{
-                writeln!(f, "XGbeCfgQueryReply {{msg_id: {msg_id}, nports: {nports}, ")?;
+            CtrlMsg::XGbeCfgQueryReply {
+                msg_id,
+                nports,
+                cfg,
+            } => {
+                writeln!(
+                    f,
+                    "XGbeCfgQueryReply {{msg_id: {msg_id}, nports: {nports}, "
+                )?;
                 writeln!(f, "cfg:[")?;
                 for x in cfg {
                     writeln!(f, "{x}")?;
@@ -513,29 +528,48 @@ impl Display for CtrlMsg {
                 writeln!(f, "]}}")
             }
 
-            CtrlMsg::SetClk { msg_id, clk_src, pps_src }=>{
-                writeln!(f, "SetClk {{msg_id: {msg_id}, clk_src: {clk_src}, pps_src:{pps_src} }}")
+            CtrlMsg::SetClk {
+                msg_id,
+                clk_src,
+                pps_src,
+            } => {
+                writeln!(
+                    f,
+                    "SetClk {{msg_id: {msg_id}, clk_src: {clk_src}, pps_src:{pps_src} }}"
+                )
             }
 
-            CtrlMsg::SetClkReply { msg_id, clk_state }=>{
-                writeln!(f, "SetClkReply {{msg_id: {msg_id}, clk_state: {clk_state}}}")
+            CtrlMsg::SetClkReply { msg_id, clk_state } => {
+                writeln!(
+                    f,
+                    "SetClkReply {{msg_id: {msg_id}, clk_state: {clk_state}}}"
+                )
             }
-            CtrlMsg::MixerSet { msg_id, nports:_, freq, phase, sync, }=>{
-                writeln!(f, "MixerSet {{msg_id: {msg_id}, freq: {freq:?}, phase:{phase:?}, sync:{sync} }}")
+            CtrlMsg::MixerSet {
+                msg_id,
+                nports: _,
+                freq,
+                phase,
+                sync,
+            } => {
+                writeln!(
+                    f,
+                    "MixerSet {{msg_id: {msg_id}, freq: {freq:?}, phase:{phase:?}, sync:{sync} }}"
+                )
             }
-            CtrlMsg::MixerSetReply { msg_id }=>{
+            CtrlMsg::MixerSetReply { msg_id } => {
                 writeln!(f, "MixerSetReply {{msg_id: {msg_id}}}")
-            },
-            CtrlMsg::PortMask { msg_id, mask }=>{
+            }
+            CtrlMsg::PortMask { msg_id, mask } => {
                 writeln!(f, "PortMask {{msg_id:{msg_id}, mask:{mask:x}}}")
             }
-            CtrlMsg::PortMaskReply { msg_id }=>{
+            CtrlMsg::PortMaskReply { msg_id } => {
                 writeln!(f, "PortMaskReply{{msg_id:{msg_id}}}")
             }
-            CtrlMsg::Reboot { msg_id }=>{
+            CtrlMsg::Reboot { msg_id } => {
                 writeln!(f, "Reboot{{msg_id:{msg_id}}}")
             }
-            CtrlMsg::RebootReply { msg_id }=>{
+            CtrlMsg::RebootReply { msg_id } => {
                 writeln!(f, "RebootReply{{msg_id:{msg_id}}}")
             }
         }?;
@@ -574,18 +608,26 @@ impl CtrlMsg {
             PwrCtrlReply { msg_id, .. } => *msg_id = mid,
             Init { msg_id, .. } => *msg_id = mid,
             InitReply { msg_id, .. } => *msg_id = mid,
-            XGbeCfgQuery { msg_id }=>*msg_id=mid,
-            XGbeCfgQueryReply { msg_id, nports:_, cfg:_a }=>*msg_id=mid,
-            XGbeCfgSingle { msg_id, port_id:_, cfg:_ }=>*msg_id=mid,
-            XGbeCfgSingleReply { msg_id }=>*msg_id=mid,
-            SetClk{ msg_id, .. }=>*msg_id=mid,
-            SetClkReply{ msg_id, .. }=>*msg_id=mid,
-            MixerSet{ msg_id, .. }=>*msg_id=mid,
-            MixerSetReply{ msg_id }=>*msg_id=mid,
-            PortMask{msg_id,..}=>*msg_id=mid,
-            PortMaskReply{msg_id}=>*msg_id=mid,
-            Reboot{ msg_id, .. }=>*msg_id=mid,
-            RebootReply{ msg_id, .. }=>*msg_id=mid,
+            XGbeCfgQuery { msg_id } => *msg_id = mid,
+            XGbeCfgQueryReply {
+                msg_id,
+                nports: _,
+                cfg: _a,
+            } => *msg_id = mid,
+            XGbeCfgSingle {
+                msg_id,
+                port_id: _,
+                cfg: _,
+            } => *msg_id = mid,
+            XGbeCfgSingleReply { msg_id } => *msg_id = mid,
+            SetClk { msg_id, .. } => *msg_id = mid,
+            SetClkReply { msg_id, .. } => *msg_id = mid,
+            MixerSet { msg_id, .. } => *msg_id = mid,
+            MixerSetReply { msg_id } => *msg_id = mid,
+            PortMask { msg_id, .. } => *msg_id = mid,
+            PortMaskReply { msg_id } => *msg_id = mid,
+            Reboot { msg_id, .. } => *msg_id = mid,
+            RebootReply { msg_id, .. } => *msg_id = mid,
         }
     }
 
@@ -623,18 +665,26 @@ impl CtrlMsg {
             } => *msg_id,
             InitReply { msg_id } => *msg_id,
 
-            XGbeCfgQuery { msg_id }=>*msg_id,
-            XGbeCfgQueryReply { msg_id, nports:_, cfg:_a }=>*msg_id,
-            XGbeCfgSingle { msg_id, port_id:_, cfg:_ }=>*msg_id,
-            XGbeCfgSingleReply { msg_id }=>*msg_id,
-            SetClk{ msg_id, .. }=>*msg_id,
-            SetClkReply{ msg_id, .. }=>*msg_id,
-            MixerSet{ msg_id, .. }=>*msg_id,
-            MixerSetReply{ msg_id }=>*msg_id,
-            PortMask{msg_id,..}=>*msg_id,
-            PortMaskReply{msg_id}=>*msg_id,
-            Reboot{ msg_id, .. }=>*msg_id,
-            RebootReply{ msg_id, .. }=>*msg_id,
+            XGbeCfgQuery { msg_id } => *msg_id,
+            XGbeCfgQueryReply {
+                msg_id,
+                nports: _,
+                cfg: _a,
+            } => *msg_id,
+            XGbeCfgSingle {
+                msg_id,
+                port_id: _,
+                cfg: _,
+            } => *msg_id,
+            XGbeCfgSingleReply { msg_id } => *msg_id,
+            SetClk { msg_id, .. } => *msg_id,
+            SetClkReply { msg_id, .. } => *msg_id,
+            MixerSet { msg_id, .. } => *msg_id,
+            MixerSetReply { msg_id } => *msg_id,
+            PortMask { msg_id, .. } => *msg_id,
+            PortMaskReply { msg_id } => *msg_id,
+            Reboot { msg_id, .. } => *msg_id,
+            RebootReply { msg_id, .. } => *msg_id,
         }
     }
 }
@@ -685,7 +735,12 @@ where
         let msg_id: u32 = rng1.random();
         cmd.set_msg_id(msg_id);
         msg_set.insert(msg_id);
-        addr_msg_id_map.insert(msg_id, addr.to_socket_addrs().expect("faild to get socket addr").collect::<Vec<_>>());
+        addr_msg_id_map.insert(
+            msg_id,
+            addr.to_socket_addrs()
+                .expect("faild to get socket addr")
+                .collect::<Vec<_>>(),
+        );
         let mut buf = Cursor::new(Vec::new());
         cmd.write(&mut buf).expect("failed to write cmd to buf");
         let buf = buf.into_inner();
@@ -810,7 +865,7 @@ where
     A: ToSocketAddrs,
     B: ToSocketAddrs,
 {
-    let mut rng1=rng();
+    let mut rng1 = rng();
     let socket = UdpSocket::bind(local_addr).expect("failed to bind");
     socket.set_broadcast(true).expect("broadcast set failed");
     socket

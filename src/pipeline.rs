@@ -113,14 +113,13 @@ impl From<UdpSocket> for MaybeMulticastReceiver {
 //     }
 // }
 
-pub fn recv_pkt<T>
-(
+pub fn recv_pkt<T>(
     socket: MaybeMulticastReceiver,
     tx_payload: Sender<LinearOwnedReusable<Payload<T>>>,
     //rx_cmd: Receiver<RecvCmd>,
-) 
-where [(); N_BYTE_PER_FRAME/std::mem::size_of::<T>()]: Sized,
-T: Sized+Default+Copy+'static,
+) where
+    [(); N_BYTE_PER_FRAME / std::mem::size_of::<T>()]: Sized,
+    T: Sized + Default + Copy + 'static,
 {
     let mut last_print_time = Instant::now();
     let print_interval = Duration::from_secs(2);
@@ -242,7 +241,7 @@ pub fn strip_meta_data_c16(
             if tx_naked_data.send(naked_data).is_err() {
                 return;
             }
-        }else{
+        } else {
             break;
         }
     }

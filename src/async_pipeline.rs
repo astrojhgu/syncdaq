@@ -6,14 +6,17 @@ use lockfree_object_pool::{LinearObjectPool, LinearOwnedReusable};
 use tokio_stream::wrappers::ReceiverStream;
 
 use std::{
-    sync::Arc,
     net::{Ipv4Addr, SocketAddrV4},
     ops::Deref,
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{net::UdpSocket, sync::mpsc};
 
-use crate::{payload::{N_BYTE_PER_FRAME, Payload}, utils::as_mut_u8_slice};
+use crate::{
+    payload::{N_BYTE_PER_FRAME, Payload},
+    utils::as_mut_u8_slice,
+};
 
 pub struct MaybeMulticastReceiver {
     socket: UdpSocket,
@@ -66,9 +69,9 @@ impl From<UdpSocket> for MaybeMulticastReceiver {
 pub fn recv_pkt<T>(
     socket: MaybeMulticastReceiver,
     buffer_size: usize,
-) -> impl Stream<Item = LinearOwnedReusable<Payload<T>>> 
-where 
-    T: Sized + Default + Copy + Send +Sync + 'static,
+) -> impl Stream<Item = LinearOwnedReusable<Payload<T>>> + Send + 'static + Unpin
+where
+    T: Sized + Default + Copy + Send + Sync + 'static,
     [T; N_BYTE_PER_FRAME / std::mem::size_of::<T>()]: Sized,
 {
     let (tx, rx) = mpsc::channel(buffer_size);
@@ -77,7 +80,7 @@ where
     tokio::spawn(async move {
         // 调用内部的逻辑流（即你原来的代码）
         let mut internal_stream = Box::pin(recv_pkt_internal(socket));
-        
+
         while let Some(payload) = internal_stream.next().await {
             // 如果下游处理慢，数据会积压在这个 tx 队列中（直到达到 buffer_size）
             if tx.send(payload).await.is_err() {
@@ -93,9 +96,10 @@ where
 
 pub fn recv_pkt_internal<T>(
     socket: MaybeMulticastReceiver,
-) -> impl Stream<Item = LinearOwnedReusable<Payload<T>>> 
-where T: Sized+Default+Copy+'static,
-[T; N_BYTE_PER_FRAME / std::mem::size_of::<T>()]: Sized,
+) -> impl Stream<Item = LinearOwnedReusable<Payload<T>>>
+where
+    T: Sized + Default + Copy + 'static,
+    [T; N_BYTE_PER_FRAME / std::mem::size_of::<T>()]: Sized,
 {
     let mut last_print_time = Instant::now();
     let print_interval = Duration::from_secs(2);

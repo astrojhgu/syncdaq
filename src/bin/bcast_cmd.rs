@@ -1,7 +1,7 @@
 use clap::Parser;
-use syncdaq::ctrl_msg::{bcast_cmd, CtrlMsg};
 use serde_yaml::from_reader;
 use std::{fs::File, time::Duration};
+use syncdaq::ctrl_msg::{CtrlMsg, bcast_cmd};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -36,7 +36,8 @@ fn main() {
     let args = Args::parse();
     let debug_level = args.debug_level;
 
-    let cmds: Vec<CtrlMsg> = from_reader(File::open(&args.cmd).expect("file not open")).expect("failed to load cmd");
+    let cmds: Vec<CtrlMsg> =
+        from_reader(File::open(&args.cmd).expect("file not open")).expect("failed to load cmd");
     for c in cmds {
         let summary = bcast_cmd(
             c,

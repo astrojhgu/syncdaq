@@ -9,12 +9,11 @@ struct Args {
 }
 
 use binrw::{BinRead, BinWrite};
-use syncdaq::ctrl_msg::{
-    print_bytes,
-    CtrlMsg::{self, *},
-    Health,
-};
 use std::{io::Cursor, net::UdpSocket};
+use syncdaq::ctrl_msg::{
+    CtrlMsg::{self, *},
+    Health, print_bytes,
+};
 fn main() {
     let args = Args::parse();
     let socket = UdpSocket::bind(args.addr).unwrap();
@@ -37,16 +36,16 @@ fn main() {
                 tick_cnt2: 10,
                 trans_state: 0,
                 locked: 0,
-                health: Health::T510Health{
-                    rfdc_restart_cnt:0, 
+                health: Health::T510Health {
+                    rfdc_restart_cnt: 0,
                     temperature: 40.0,
-                    nports: 8, 
-                    fifo_full_cnt: 0, 
+                    nports: 8,
+                    fifo_full_cnt: 0,
                     pkt_cnt1: vec![0; 8],
                     axi_frame_cnt1: vec![0; 8],
                     pkt_cnt2: vec![0; 8],
                     axi_frame_cnt2: vec![0; 8],
-                }
+                },
             },
             //QueryReply { msg_id } => *msg_id = mid,
             Sync { msg_id } => SyncReply { msg_id },
@@ -91,16 +90,27 @@ fn main() {
 
             PwrCtrl { msg_id, .. } => PwrCtrlReply { msg_id },
 
-            XGbeCfgSingle { msg_id, port_id:_, cfg:_ }=>XGbeCfgSingleReply { msg_id },
+            XGbeCfgSingle {
+                msg_id,
+                port_id: _,
+                cfg: _,
+            } => XGbeCfgSingleReply { msg_id },
 
-            XGbeCfgQuery { msg_id }=>XGbeCfgQueryReply { msg_id, nports: 4, cfg: vec![syncdaq::ctrl_msg::XGbeCfg{
-                dst_ip:[192,168,4,10],
-                dst_mac:[0xaa,0xbb,0xcc,0xdd,0xee,0xff],
-                dst_port:3000,
-                src_ip:[192,168,10,11],
-                src_mac:[0xaa,0xbb,0xcc,0xdd,0xee,0xfe],
-                src_port:3000,
-            }; 4] },
+            XGbeCfgQuery { msg_id } => XGbeCfgQueryReply {
+                msg_id,
+                nports: 4,
+                cfg: vec![
+                    syncdaq::ctrl_msg::XGbeCfg {
+                        dst_ip: [192, 168, 4, 10],
+                        dst_mac: [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff],
+                        dst_port: 3000,
+                        src_ip: [192, 168, 10, 11],
+                        src_mac: [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xfe],
+                        src_port: 3000,
+                    };
+                    4
+                ],
+            },
 
             x => {
                 let desc = "invalid".to_string().as_bytes().to_vec();

@@ -126,7 +126,6 @@ pub fn resample2(
     state.copy_within(n_input..n_input + n_old_state, 0);
 }
 
-
 #[inline(always)]
 pub fn resample2_gen(
     input: &[i16],
@@ -135,16 +134,15 @@ pub fn resample2_gen(
     state: &mut [i16],
     bit_shift: u32,
 ) {
-    let coeffs_i32: Vec<I32s> =
-        coeffs.iter().map(|&c| I32s::splat(c as i32)).collect();
+    let coeffs_i32: Vec<I32s> = coeffs.iter().map(|&c| I32s::splat(c as i32)).collect();
 
     let n_half_taps = coeffs_i32.len();
     let m_half = n_half_taps - 1;
     let n_input = input.len();
     let n_output = output.len();
-    
+
     // 保持原来的状态长度不变，以兼容你外层的 buffer 逻辑
-    let n_old_state = m_half * 4; 
+    let n_old_state = m_half * 4;
 
     state[n_old_state..n_old_state + n_input].copy_from_slice(input);
 
@@ -202,7 +200,7 @@ pub fn resample2_gen(
 
         // 合并所有累加器
         let acc = acc0 + acc1 + acc2 + acc3;
-        
+
         let shifted = acc >> shift_vec;
         let out_simd: Simd<i16, LANES16> = shifted.cast::<i16>();
         output[out_idx..out_idx + LANES16].copy_from_slice(out_simd.as_array());
@@ -223,7 +221,6 @@ fn extract_even_iq(src: &[i16]) -> Simd<i32, LANES16> {
     picked.cast::<i32>()
 }
 
-
 #[inline(always)]
 pub fn fir_symmetric_full_rate_plain(
     input: &[i16],
@@ -234,9 +231,9 @@ pub fn fir_symmetric_full_rate_plain(
 ) {
     assert_eq!(input.len(), output.len());
 
-    let m_half = coeffs.len();          // M
-    let n_full_taps = m_half * 2;       // 2M
-    let n_input = input.len() / 2;      // complex samples
+    let m_half = coeffs.len(); // M
+    let n_full_taps = m_half * 2; // 2M
+    let n_input = input.len() / 2; // complex samples
     let n_output = output.len() / 2;
 
     assert_eq!(n_input, n_output);
@@ -245,17 +242,11 @@ pub fn fir_symmetric_full_rate_plain(
     let n_old_state = n_full_taps - 1;
 
     // 拼接 state
-    state[n_old_state * 2..n_old_state * 2 + input.len()]
-        .copy_from_slice(input);
+    state[n_old_state * 2..n_old_state * 2 + input.len()].copy_from_slice(input);
 
-    assert_eq!(
-        state.len(),
-        n_old_state * 2 + input.len(),
-        "状态空间不足"
-    );
+    assert_eq!(state.len(), n_old_state * 2 + input.len(), "状态空间不足");
 
     for n in 0..n_output {
-
         let center = n + m_half - 1; // 对齐到 FIR 中心左侧
 
         let mut acc_re: i32 = 0;
@@ -263,7 +254,7 @@ pub fn fir_symmetric_full_rate_plain(
 
         for k in 0..m_half {
             // 对称点：x[n-k] 和 x[n+k+1]
-            let left_idx  = (center - k) * 2;
+            let left_idx = (center - k) * 2;
             let right_idx = (center + k + 1) * 2;
 
             let re = state[left_idx] as i32 + state[right_idx] as i32;
@@ -275,7 +266,7 @@ pub fn fir_symmetric_full_rate_plain(
             acc_im += im * c;
         }
 
-        output[2 * n]     = (acc_re >> bit_shift) as i16;
+        output[2 * n] = (acc_re >> bit_shift) as i16;
         output[2 * n + 1] = (acc_im >> bit_shift) as i16;
     }
 
@@ -288,8 +279,7 @@ fn extract_i(src: &[i16]) -> Simd<i32, LANES16> {
     let s = Simd::<i16, 32>::from_slice(&src[0..32]);
     let picked = simd_swizzle!(
         s,
-        [0, 2, 4, 6, 8, 10, 12, 14,
-         16, 18, 20, 22, 24, 26, 28, 30]
+        [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30]
     );
     picked.cast::<i32>()
 }
@@ -299,13 +289,10 @@ fn extract_q(src: &[i16]) -> Simd<i32, LANES16> {
     let s = Simd::<i16, 32>::from_slice(&src[0..32]);
     let picked = simd_swizzle!(
         s,
-        [1, 3, 5, 7, 9, 11, 13, 15,
-         17, 19, 21, 23, 25, 27, 29, 31]
+        [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31]
     );
     picked.cast::<i32>()
 }
-
-
 
 #[inline(always)]
 pub fn fir_symmetric_full_rate(
@@ -332,27 +319,18 @@ pub fn fir_symmetric_full_rate(
 
     let n_old_state = n_full_taps - 1;
 
-    assert_eq!(
-        state.len(),
-        n_old_state * 2 + input.len(),
-        "状态空间不足"
-    );
+    assert_eq!(state.len(), n_old_state * 2 + input.len(), "状态空间不足");
 
     // --- 拼接 state ---
-    state[n_old_state * 2..n_old_state * 2 + input.len()]
-        .copy_from_slice(input);
-
-    
+    state[n_old_state * 2..n_old_state * 2 + input.len()].copy_from_slice(input);
 
     // --- SIMD 系数 ---
-    let coeffs_i32: Vec<I32s> =
-        coeffs.iter().map(|&c| I32s::splat(c as i32)).collect();
+    let coeffs_i32: Vec<I32s> = coeffs.iter().map(|&c| I32s::splat(c as i32)).collect();
 
     let shift_vec = I32s::splat(bit_shift as i32);
 
     // --- 主循环：每次处理 16 个复数 ---
     for j in 0..(n_output / LANES) {
-
         let base_n = j * LANES;
 
         let mut acc_i = I32s::splat(0);
@@ -360,11 +338,10 @@ pub fn fir_symmetric_full_rate(
 
         // FIR 累加
         for k in 0..m_half {
-
             // 对齐中心（和 plain 版本完全一致）
             let center = base_n + m_half - 1;
 
-            let left  = (center - k) * 2;
+            let left = (center - k) * 2;
             let right = (center + k + 1) * 2;
 
             // SIMD load
@@ -387,7 +364,7 @@ pub fn fir_symmetric_full_rate(
         // --- 写回（interleave）---
         for lane in 0..LANES {
             let idx = 2 * (base_n + lane);
-            output[idx]     = out_i[lane];
+            output[idx] = out_i[lane];
             output[idx + 1] = out_q[lane];
         }
     }
@@ -396,13 +373,12 @@ pub fn fir_symmetric_full_rate(
     state.copy_within(input.len()..input.len() + n_old_state * 2, 0);
 }
 
-
 /*
 #[inline(always)]
 pub fn fir_symmetric_full_rate(
     input: &[i16],
     output: &mut [i16],
-    coeffs: &[i16], 
+    coeffs: &[i16],
     state: &mut [i16],
     bit_shift: u32,
 ) {
@@ -426,7 +402,7 @@ pub fn fir_symmetric_full_rate(
 
         for k in 0..m_half {
             let c = coeffs_i32[k];
-            
+
             // 对应 plain 逻辑：left = (i+k)*2, right = (i + n_full - 1 - k)*2
             // 这里我们直接按 i16 索引操作
             let left_idx = base_idx + k * 2;
@@ -449,7 +425,7 @@ pub fn fir_symmetric_full_rate(
             };
 
             let sum = l_vec.cast::<i32>() + r_vec.cast::<i32>();
-            
+
             if k % 2 == 0 { acc0 += sum * c; } else { acc1 += sum * c; }
         }
 
