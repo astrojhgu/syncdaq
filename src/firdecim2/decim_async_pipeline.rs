@@ -80,23 +80,25 @@ pub fn decim2(
         let mut batched_input = input.chunks(2);
         loop{
             let mut output = pool.pull_owned();
-            assert!(output.data.len() == patch_len);
-            let (output1, output2) = output.data.split_at_mut(patch_len/2);
 
-            assert!(output1.len() == patch_len/2);
-            assert!(output2.len() == patch_len/2);
-            let mut output_raw1 = unsafe {
-                std::slice::from_raw_parts_mut(output1.as_mut_ptr() as *mut i16, patch_len)
-            };
-
-            let mut output_raw2 = unsafe {
-                std::slice::from_raw_parts_mut(output2.as_mut_ptr() as *mut i16, patch_len)
-            };
 
             if let Some(batch)=batched_input.next().await{
                 if batch.len()!=2{
                     break;
                 }
+                assert!(output.data.len() == patch_len);
+                let (output1, output2) = output.data.split_at_mut(patch_len/2);
+
+                assert!(output1.len() == patch_len/2);
+                assert!(output2.len() == patch_len/2);
+                let mut output_raw1 = unsafe {
+                    std::slice::from_raw_parts_mut(output1.as_mut_ptr() as *mut i16, patch_len)
+                };
+
+                let mut output_raw2 = unsafe {
+                    std::slice::from_raw_parts_mut(output2.as_mut_ptr() as *mut i16, patch_len)
+                };
+
                 let input1=&batch[0];
                 let input2=&batch[1];
 
