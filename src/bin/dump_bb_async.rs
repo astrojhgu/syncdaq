@@ -1,3 +1,4 @@
+#![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 use std::net::{Ipv4Addr, SocketAddrV4};
 
@@ -14,7 +15,7 @@ use tokio::{
     io::{AsyncWriteExt, BufWriter},
     net::UdpSocket,
     sync::mpsc,
-    time::{Duration, sleep},
+    time::Duration,
 };
 
 #[derive(Parser, Debug)]

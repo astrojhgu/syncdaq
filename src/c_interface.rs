@@ -5,7 +5,7 @@ use lockfree_object_pool::LinearOwnedReusable;
 use num::Complex;
 
 use crate::{
-    ctrl_msg::{CtrlMsg, bcast_cmd, send_cmd},
+    ctrl_msg::{CtrlMsg, bcast_cmd},
     payload::{Payload, n_pt_per_frame},
     sdr::Sdr,
 };

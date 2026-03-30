@@ -1,10 +1,9 @@
+#![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 use futures_util::{StreamExt, pin_mut};
-use lockfree_object_pool::LinearOwnedReusable;
 use num::Complex;
 use std::{
-    io::Write,
-    net::{Ipv4Addr, SocketAddrV4},
+    net::SocketAddrV4,
 };
 use tokio::{
     fs::File,
@@ -13,15 +12,13 @@ use tokio::{
 };
 
 use clap::Parser;
-use crossbeam::channel::unbounded;
 use syncdaq::{
-    async_pipeline::{MaybeMulticastReceiver, recv_pkt},
+    async_pipeline::recv_pkt,
     firdecim2::{
         decim_async_pipeline::{decim2_chained, fir_pipeline},
         fir_coeffs::{fir_anti_aliasing_coeffs, fir_half_band_coeffs},
     },
-    payload::Payload,
-    utils::{as_u8_slice, set_recv_buffer_size},
+    utils::as_u8_slice,
 };
 
 #[derive(Parser, Debug)]
@@ -75,7 +72,7 @@ async fn main() {
 
     let s = recv_pkt::<Complex<i16>>(socket, 16);
     let fir_coeffs = fir_half_band_coeffs();
-    let s = decim2_chained(s, &fir_coeffs, &args.bit_shifts, 16);
+    let s = decim2_chained(s, &fir_coeffs, &args.bit_shifts);
 
     let s = if let Some(ashift) = args.anti_aliasing_shift {
         let anti_aliasing_coeffs = fir_anti_aliasing_coeffs();

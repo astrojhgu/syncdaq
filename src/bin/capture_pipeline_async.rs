@@ -1,9 +1,8 @@
+#![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 use futures_util::{StreamExt, pin_mut};
-use lockfree_object_pool::LinearOwnedReusable;
 use std::{
-    io::Write,
-    net::{Ipv4Addr, SocketAddrV4},
+    net::SocketAddrV4,
 };
 use tokio::{
     fs::File,
@@ -12,11 +11,10 @@ use tokio::{
 };
 
 use clap::Parser;
-use crossbeam::channel::unbounded;
+
 use syncdaq::{
-    async_pipeline::{MaybeMulticastReceiver, recv_pkt},
-    payload::Payload,
-    utils::{as_u8_slice, set_recv_buffer_size},
+    async_pipeline::recv_pkt,
+    utils::as_u8_slice,
 };
 
 #[derive(Parser, Debug)]

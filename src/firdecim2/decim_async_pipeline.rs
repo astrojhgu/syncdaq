@@ -3,7 +3,7 @@ use futures_core::Stream;
 use futures_util::StreamExt;
 use lockfree_object_pool::{LinearObjectPool, LinearOwnedReusable};
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use std::{
     ops::DerefMut,
@@ -21,27 +21,27 @@ use super::{
     firdec_worker::resample2,
 };
 
-pub fn with_buffer<S>(upstream: S, cap: usize) -> impl Stream<Item = S::Item>
+pub fn with_buffer<S>(upstream: S) -> impl Stream<Item = S::Item>
 where
     S: Stream + Send + 'static, // 去掉了 Unpin 约束
     S::Item: Send + 'static,
 {
-    let (tx, rx) = mpsc::channel(cap);
+    let (tx, rx) = mpsc::unbounded_channel();
 
     // 在这里进行 Pin
     let mut pinned_upstream = Box::pin(upstream);
-
+    
     tokio::spawn(async move {
         // 现在可以使用 pinned_upstream，因为 Pin<Box<S>> 实现了 Unpin
         while let Some(item) = pinned_upstream.next().await {
             //println!("pkt cnt: {}", item.pkt_cnt);
-            if tx.send(item).await.is_err() {
+            if tx.send(item).is_err() {
                 break;
             }
         }
     });
 
-    ReceiverStream::new(rx)
+    UnboundedReceiverStream::new(rx)
 }
 
 pub fn decim2(
@@ -151,14 +151,13 @@ pub fn decim2_chained(
     input: impl Stream<Item = LinearOwnedReusable<Payload<Complex<i16>>>> + 'static + Send,
     fir_coeffs: &[i16],
     bit_shifts: &[u32],
-    buffer_size: usize,
 ) -> Pin<Box<dyn Stream<Item = LinearOwnedReusable<Payload<Complex<i16>>>> + 'static + Send>> {
     let mut output: Pin<
         Box<dyn Stream<Item = LinearOwnedReusable<Payload<Complex<i16>>>> + Send + 'static>,
     > = Box::pin(input);
     for &bs in bit_shifts {
         let s = decim2(output, fir_coeffs, bs);
-        let s = with_buffer(s, buffer_size);
+        let s = with_buffer(s);
         output = Box::pin(s);
     }
     output

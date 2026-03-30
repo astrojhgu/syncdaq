@@ -1,5 +1,5 @@
-use super::{F32s, I16s, I32s, LANES8, LANES16};
-use std::simd::{Simd, StdFloat, num::SimdInt, simd_swizzle};
+use super::{I32s, LANES16};
+use std::simd::{Simd, num::SimdInt, simd_swizzle};
 
 pub fn resample2_plain(
     input: &[i16],

@@ -1,3 +1,4 @@
+#![allow(incomplete_features)]
 #![feature(portable_simd)]
 #![feature(generic_const_exprs)]
 
