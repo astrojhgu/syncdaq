@@ -7,7 +7,7 @@ use num::Complex;
 use crate::{
     ctrl_msg::{CtrlMsg, bcast_cmd},
     payload::{Payload, n_pt_per_frame},
-    sdr::Sdr,
+    sdr::{Sdr, Sdr16Decim},
 };
 
 use std::{
@@ -47,15 +47,16 @@ pub struct CSdr {
     cursor: usize,
 }
 
+
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct CComplex {
     pub re: i16,
     pub im: i16,
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct CComplexF32 {
     pub re: f32,
     pub im: f32,
@@ -284,4 +285,50 @@ pub unsafe extern "C" fn find_device(
         }
     }
     nresult
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn use_payload_ci16(_p: Payload<CComplex>){
+
+}
+
+pub struct CSdr16Decim {
+    sdr_dev: Sdr16Decim,
+    rx_payload: Receiver<LinearOwnedReusable<Payload<Complex<i16>>>>,
+    buffer: Option<LinearOwnedReusable<Payload<Complex<i16>>>>,
+    cursor: usize,
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn new_sdr16decim_device(
+    remote_ctrl_ip: u32,
+    local_ctrl_port: u16,
+    local_payload_ip: u32,
+    local_payload_port: u16,
+    cfg_file: *const std::ffi::c_char,
+) -> *mut CSdr {
+    let remote_ctrl_addr = SocketAddrV4::new(Ipv4Addr::from(remote_ctrl_ip), 3000);
+    let local_ctrl_addr = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), local_ctrl_port);
+    let local_payload_addr =
+        SocketAddrV4::new(Ipv4Addr::from(local_payload_ip), local_payload_port);
+
+    let c_str = if cfg_file.is_null() {
+        None
+    } else {
+        Some(unsafe { std::ffi::CStr::from_ptr(cfg_file) })
+    };
+
+    let (sdr_dev, rx_payload) = Sdr::new(
+        remote_ctrl_addr,
+        local_ctrl_addr,
+        local_payload_addr,
+        c_str.map(|x| x.to_str().unwrap()),
+    );
+
+    Box::into_raw(Box::new(CSdr {
+        sdr_dev,
+        rx_payload,
+        buffer: None,
+        cursor: 0,
+    }))
 }

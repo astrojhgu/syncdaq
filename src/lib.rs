@@ -10,3 +10,5 @@ pub mod payload;
 pub mod pipeline;
 pub mod sdr;
 pub mod utils;
+pub mod device_discovery;
+pub mod default_cfg;

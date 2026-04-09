@@ -6,15 +6,14 @@ use std::{
     time::Duration,
 };
 
+use num::Complex;
 use serde_yaml::from_reader;
 
-use crossbeam::channel::{Receiver, bounded};
+use crossbeam::channel::{Receiver, bounded, unbounded};
 use lockfree_object_pool::LinearOwnedReusable;
 
 use crate::{
-    ctrl_msg::{CmdReplySummary, CtrlMsg, send_cmd},
-    payload::{N_BYTE_PER_FRAME, Payload},
-    pipeline::recv_pkt,
+    ctrl_msg::{CmdReplySummary, CtrlMsg, send_cmd}, firdecim2::{decim_pipeline::{start_decim_pipeline_chain, start_fir_pipeline}, fir_coeffs::{fir_anti_aliasing_coeffs, fir_half_band_coeffs}}, payload::{N_BYTE_PER_FRAME, Payload}, pipeline::recv_pkt
 };
 
 pub struct SdrCtrl {
@@ -133,5 +132,85 @@ impl Sdr {
             },
             rx_payload,
         )
+    }
+}
+
+pub struct Sdr16Decim {
+    rx_threads: Vec<JoinHandle<()>>,
+    pub ctrl: SdrCtrl,
+}
+
+impl Drop for Sdr16Decim {
+    fn drop(&mut self) {
+        eprintln!("dropped");
+        self.ctrl.stream_stop();
+        for h in self.rx_threads.drain(..) {
+            if let Ok(()) = h.join() {
+                eprintln!("rx thread joined");
+            } else {
+                eprintln!("failed to join rx thread");
+            }
+        }
+        // let h = self.rx_thread.take();
+        // if let Some(h1) = h
+        //     && let Ok(()) = h1.join()
+        // {}
+    }
+}
+
+impl Sdr16Decim {
+    #[allow(clippy::type_complexity)]
+    pub fn new<P>(
+        remote_ctrl_addr: SocketAddrV4,
+        local_ctrl_addr: SocketAddrV4,
+        local_payload_addr: SocketAddrV4,
+        decim_shifts: &[u32],
+        anti_aliasing_shift: Option<u32>,
+        init_file: Option<P>,
+    ) -> (Sdr16Decim, Receiver<LinearOwnedReusable<Payload<Complex<i16>>>>)
+    where
+        P: std::fmt::Debug + AsRef<Path>,
+        //[T; N_BYTE_PER_FRAME / std::mem::size_of::<T>()]: Sized,
+        //T: Sized + Default + Copy + Send + Sync + 'static,
+    {
+        let ctrl = SdrCtrl {
+            remote_ctrl_addr,
+            local_ctrl_addr,
+        };
+
+        if let Some(init_file) = init_file {
+            println!("init file: {init_file:?}");
+            ctrl.init_device(init_file);
+        }
+
+        let payload_socket =
+            UdpSocket::bind(local_payload_addr).expect("failed to bind payload socket");
+
+        send_cmd(
+            CtrlMsg::StreamStop { msg_id: 0 },
+            &[remote_ctrl_addr],
+            local_ctrl_addr,
+            Some(Duration::from_secs(10)),
+            1,
+        );
+        let (tx_payload, rx_payload) = bounded::<LinearOwnedReusable<Payload<Complex<i16>>>>(8192);
+        let rx_thread =
+            std::thread::spawn(|| recv_pkt::<Complex<i16>>(payload_socket.into(), tx_payload));
+        let fir_coeffs = fir_half_band_coeffs();
+        let (mut rx_threads, rx) =
+            start_decim_pipeline_chain(rx_payload, &fir_coeffs, decim_shifts);
+        rx_threads.push(rx_thread);
+
+        let rx = if let Some(anti_aliasing_shift) = anti_aliasing_shift {
+            let anti_aliasing_coeffs = fir_anti_aliasing_coeffs();
+            let (tx1, rx1) = unbounded::<LinearOwnedReusable<Payload<Complex<i16>>>>();
+            let rx_thread = start_fir_pipeline(rx, tx1, &anti_aliasing_coeffs, anti_aliasing_shift);
+            rx_threads.push(rx_thread);
+            rx1
+        } else {
+            rx
+        };
+        
+        (Sdr16Decim { rx_threads, ctrl }, rx)
     }
 }
