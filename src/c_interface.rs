@@ -40,14 +40,6 @@ fn convert_simd(src: &[i16], dst: &mut [f32]) {
 
 //use sdaa_ctrl::ctrl_msg::{CtrlMsg, bcast_cmd, send_cmd};
 
-pub struct CSdr {
-    sdr_dev: Sdr,
-    rx_payload: Receiver<LinearOwnedReusable<Payload<u8>>>,
-    buffer: Option<LinearOwnedReusable<Payload<u8>>>,
-    cursor: usize,
-}
-
-
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CComplex {
@@ -62,74 +54,16 @@ pub struct CComplexF32 {
     pub im: f32,
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn new_sdr_device(
-    remote_ctrl_ip: u32,
-    local_ctrl_port: u16,
-    local_payload_ip: u32,
-    local_payload_port: u16,
-    cfg_file: *const std::ffi::c_char,
-) -> *mut CSdr {
-    let remote_ctrl_addr = SocketAddrV4::new(Ipv4Addr::from(remote_ctrl_ip), 3000);
-    let local_ctrl_addr = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), local_ctrl_port);
-    let local_payload_addr =
-        SocketAddrV4::new(Ipv4Addr::from(local_payload_ip), local_payload_port);
-
-    let c_str = if cfg_file.is_null() {
-        None
-    } else {
-        Some(unsafe { std::ffi::CStr::from_ptr(cfg_file) })
-    };
-
-    let (sdr_dev, rx_payload) = Sdr::new(
-        remote_ctrl_addr,
-        local_ctrl_addr,
-        local_payload_addr,
-        c_str.map(|x| x.to_str().unwrap()),
-    );
-
-    Box::into_raw(Box::new(CSdr {
-        sdr_dev,
-        rx_payload,
-        buffer: None,
-        cursor: 0,
-    }))
+pub struct CSdr16Decim {
+    sdr_dev: Sdr16Decim,
+    rx_payload: Receiver<LinearOwnedReusable<Payload<Complex<i16>>>>,
+    buffer: Option<LinearOwnedReusable<Payload<Complex<i16>>>>,
+    cursor: usize,
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn free_sdr_device(csdr: *mut CSdr) {
-    if !csdr.is_null() {
-        let obj = unsafe { Box::from_raw(csdr) };
-        let CSdr {
-            sdr_dev: _,
-            rx_payload,
-            buffer: _,
-            cursor: _,
-        } = *obj;
-        drop(rx_payload);
-    }
-}
-
-// #[unsafe(no_mangle)]
-// pub unsafe extern "C" fn set_lo_freq(csdr: *mut CSdr, f_lo_mega_hz: f64) {
-//     if csdr.is_null() {
-//         return;
-//     }
-
-//     let obj = unsafe { &mut *csdr };
-//     //obj.tx_cmd.send(DdcCmd::LoCh(lo_ch as isize)).unwrap();
-//     let cmd = CtrlMsg::MixerSet {
-//         msg_id: 0,
-//         nports: 8,
-//         freq: vec![f_lo_mega_hz; 8],
-//         phase: vec![0.0; 8],
-//         sync: 0,
-//     };
-//     let _reply = obj.sdr_dev.ctrl.send_cmd(cmd);
-// }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fetch_data_16(csdr: *mut CSdr, buf: *mut CComplex, npt: usize) {
+pub unsafe extern "C" fn fetch_data_16(csdr: *mut CSdr16Decim, buf: *mut CComplex, npt: usize) {
     if csdr.is_null() {
         return;
     }
@@ -154,12 +88,13 @@ pub unsafe extern "C" fn fetch_data_16(csdr: *mut CSdr, buf: *mut CComplex, npt:
             continue;
         }
         let copy_len = (total - written).min(available);
-        let buf_ci16 = unsafe {
-            from_raw_parts(
-                obj.buffer.as_ref().unwrap().data.as_ptr() as *const Complex<i16>,
-                n_pt_per_frame::<i16>(),
-            )
-        };
+        // let buf_ci16 = unsafe {
+        //     from_raw_parts(
+        //         obj.buffer.as_ref().unwrap().data.as_ptr() as *const Complex<i16>,
+        //         n_pt_per_frame::<i16>(),
+        //     )
+        // };
+        let buf_ci16= &obj.buffer.as_ref().unwrap().data;
         buf[written..written + copy_len]
             .copy_from_slice(&buf_ci16[obj.cursor..obj.cursor + copy_len]);
         obj.cursor += copy_len;
@@ -167,45 +102,6 @@ pub unsafe extern "C" fn fetch_data_16(csdr: *mut CSdr, buf: *mut CComplex, npt:
     }
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn fetch_data_cf32(csdr: *mut CSdr, buf: *mut CComplexF32, npt: usize) {
-    if csdr.is_null() {
-        return;
-    }
-
-    let obj = unsafe { &mut *csdr };
-    let buf =
-        unsafe { std::slice::from_raw_parts_mut(buf as *mut Complex<f32> as *mut f32, npt * 2) };
-    if obj.buffer.is_none() {
-        obj.buffer = Some(obj.rx_payload.recv().unwrap());
-        obj.cursor = 0;
-    }
-
-    let mut written = 0;
-    let total = npt;
-    while written < total {
-        let available = n_pt_per_frame::<i16>() - obj.cursor;
-        if available == 0 {
-            obj.buffer = Some(obj.rx_payload.recv().unwrap());
-            obj.cursor = 0;
-            continue;
-        }
-        let copy_len = (total - written).min(available);
-
-        let dst_buf = &mut buf[written * 2..written * 2 + copy_len * 2];
-        //let mut src_buf=obj.buffer.as_ref().unwrap().data[obj.cursor..obj.cursor + copy_len]
-        let src_buf = unsafe {
-            from_raw_parts(
-                obj.buffer.as_ref().unwrap().data.as_ptr().add(obj.cursor) as *const i16,
-                copy_len * 2,
-            )
-        };
-        convert_simd(src_buf, dst_buf);
-        //.copy_from_slice(&obj.buffer.as_ref().unwrap().data[obj.cursor..obj.cursor + copy_len]);
-        obj.cursor += copy_len;
-        written += copy_len;
-    }
-}
 
 /// # Safety
 ///
@@ -219,7 +115,7 @@ pub extern "C" fn get_mtu() -> usize {
 ///
 /// This function should not be called before the horsemen are ready.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn start_data_stream(csdr: *mut CSdr) {
+pub unsafe extern "C" fn start_data_stream(csdr: *mut CSdr16Decim) {
     let obj = unsafe { &mut *csdr };
     obj.sdr_dev.ctrl.stream_start();
 }
@@ -228,7 +124,7 @@ pub unsafe extern "C" fn start_data_stream(csdr: *mut CSdr) {
 ///
 /// This function should not be called before the horsemen are ready.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn set_mixer_freq(csdr: *mut CSdr, freq_mega_hz: f64, sync: u32) {
+pub unsafe extern "C" fn set_mixer_freq(csdr: *mut CSdr16Decim, freq_mega_hz: f64, sync: u32) {
     let obj = unsafe { &mut *csdr };
     obj.sdr_dev.ctrl.set_mixer_freq(freq_mega_hz, sync);
 }
@@ -237,7 +133,7 @@ pub unsafe extern "C" fn set_mixer_freq(csdr: *mut CSdr, freq_mega_hz: f64, sync
 ///
 /// This function should not be called before the horsemen are ready.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn stop_data_stream(csdr: *mut CSdr) {
+pub unsafe extern "C" fn stop_data_stream(csdr: *mut CSdr16Decim) {
     let obj = unsafe { &mut *csdr };
     obj.sdr_dev.ctrl.stream_stop();
 }
@@ -246,89 +142,80 @@ pub unsafe extern "C" fn stop_data_stream(csdr: *mut CSdr) {
 ///
 /// This function should not be called before the horsemen are ready.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn find_device(
-    addr: u32,
+pub unsafe extern "C" fn find_all_devices(
     result: *mut u32,
     max_n: usize,
     local_port: u16,
 ) -> usize {
-    let result = unsafe { from_raw_parts_mut(result, max_n) };
-    let ip = Ipv4Addr::from(addr);
+    let devices = crate::device_discovery::get_all_device_info(local_port).unwrap_or_default();
+    let n = devices.len().min(max_n);
 
-    let addr = SocketAddrV4::new(ip, 3000);
+    let result_slice = unsafe { from_raw_parts_mut(result, n) };
 
-    let query = CtrlMsg::Query { msg_id: 0 };
-
-    let summary = bcast_cmd(
-        query,
-        addr,
-        format!("0.0.0.0:{local_port}"),
-        Some(Duration::from_secs(1)),
-        1,
-    );
-
-    let mut nresult = 0;
-    for (a, _r) in summary.normal_reply {
-        if let SocketAddr::V4(x) = a {
-            let ip = x.ip();
-            let mut r: u32 = 0;
-            for (i, &o) in ip.octets().iter().enumerate() {
-                //(i as u32)
-                r += (o as u32) << (8 * (3 - i));
-            }
-
-            nresult += 1;
-            if nresult >= max_n {
-                break;
-            }
-            result[nresult - 1] = r;
-        }
+    for (i, device) in devices.into_iter().take(n).enumerate() {
+        let ip = match device.ctrl_addr.ip() {
+            std::net::IpAddr::V4(ipv4) => ipv4,
+            _ => continue,
+        };
+        result_slice[i] = u32::from(ip);
     }
-    nresult
+    n
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn use_payload_ci16(_p: Payload<CComplex>){
+pub extern "C" fn use_payload_ci16(_p: Payload<CComplex>) {}
 
-}
-
-pub struct CSdr16Decim {
-    sdr_dev: Sdr16Decim,
-    rx_payload: Receiver<LinearOwnedReusable<Payload<Complex<i16>>>>,
-    buffer: Option<LinearOwnedReusable<Payload<Complex<i16>>>>,
-    cursor: usize,
-}
 
 #[unsafe(no_mangle)]
-pub extern "C" fn new_sdr16decim_device(
-    remote_ctrl_ip: u32,
+pub extern "C" fn make_sdr16_decim(
+    ip: &[u8; 4],
     local_ctrl_port: u16,
-    local_payload_ip: u32,
-    local_payload_port: u16,
+    port_id: usize,
+    decim_shifts: *const u32,
+    ndecim_shifts: usize,
+    anti_aliasing_shift: u32,
     cfg_file: *const std::ffi::c_char,
-) -> *mut CSdr {
-    let remote_ctrl_addr = SocketAddrV4::new(Ipv4Addr::from(remote_ctrl_ip), 3000);
-    let local_ctrl_addr = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), local_ctrl_port);
-    let local_payload_addr =
-        SocketAddrV4::new(Ipv4Addr::from(local_payload_ip), local_payload_port);
-
+) -> *mut CSdr16Decim {
+    let ip = Ipv4Addr::from(*ip);
+    let decim_shifts = unsafe { from_raw_parts(decim_shifts, ndecim_shifts) };
     let c_str = if cfg_file.is_null() {
         None
     } else {
-        Some(unsafe { std::ffi::CStr::from_ptr(cfg_file) })
+        Some(
+            unsafe { std::ffi::CStr::from_ptr(cfg_file) }
+                .to_string_lossy()
+                .into_owned(),
+        )
     };
 
-    let (sdr_dev, rx_payload) = Sdr::new(
-        remote_ctrl_addr,
-        local_ctrl_addr,
-        local_payload_addr,
-        c_str.map(|x| x.to_str().unwrap()),
-    );
+    let (sdr_dev, rx_payload) = crate::device_discovery::make_sdr16_decim(
+        ip,
+        local_ctrl_port,
+        port_id,
+        decim_shifts,
+        anti_aliasing_shift,
+        c_str,
+    )
+    .unwrap();
 
-    Box::into_raw(Box::new(CSdr {
+    Box::into_raw(Box::new(CSdr16Decim {
         sdr_dev,
         rx_payload,
         buffer: None,
         cursor: 0,
     }))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn free_sdr_device(csdr: *mut CSdr16Decim) {
+    if !csdr.is_null() {
+        let obj = unsafe { Box::from_raw(csdr) };
+        let CSdr16Decim {
+            sdr_dev: _,
+            rx_payload,
+            buffer: _,
+            cursor: _,
+        } = *obj;
+        drop(rx_payload);
+    }
 }

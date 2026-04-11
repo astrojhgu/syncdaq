@@ -1,15 +1,23 @@
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
+    path::Path,
     time::Duration,
 };
 
+use crossbeam::channel::Receiver;
 use if_addrs::{IfAddr, get_if_addrs};
 
+use lockfree_object_pool::LinearOwnedReusable;
+use num::Complex;
 use pnet_datalink::MacAddr;
 use pnet_datalink::NetworkInterface;
 use pnet_datalink::interfaces;
 
-use crate::ctrl_msg::{CmdReplySummary, CtrlMsg, send_cmd};
+use crate::{
+    ctrl_msg::{CmdReplySummary, CtrlMsg, send_cmd},
+    payload::Payload,
+    sdr::Sdr16Decim,
+};
 
 #[derive(Debug, Clone)]
 pub struct IfaceBroadcast {
@@ -21,7 +29,7 @@ pub struct IfaceBroadcast {
 #[derive(Debug, Clone)]
 pub struct DeviceInfo {
     pub ctrl_addr: SocketAddr,
-    pub payload_addr: Vec<Option<SocketAddr>>,
+    pub payload_addr: Vec<Option<SocketAddrV4>>,
 }
 
 pub fn list_iface_broadcasts() -> std::io::Result<Vec<IfaceBroadcast>> {
@@ -87,7 +95,7 @@ pub fn find_iface_by_mac(target: MacAddr) -> Option<NetworkInterface> {
     None
 }
 
-pub fn get_device_info() -> std::io::Result<Vec<DeviceInfo>> {
+pub fn get_all_device_info(local_ctrl_port: u16) -> std::io::Result<Vec<DeviceInfo>> {
     let addrs = enumerate_device_addr()?;
 
     let CmdReplySummary {
@@ -97,7 +105,7 @@ pub fn get_device_info() -> std::io::Result<Vec<DeviceInfo>> {
     } = send_cmd(
         crate::ctrl_msg::CtrlMsg::XGbeCfgQuery { msg_id: 0 },
         &addrs,
-        "0.0.0.0:3001",
+        (Ipv4Addr::new(0, 0, 0, 0), local_ctrl_port),
         Some(Duration::from_secs(1)),
         1,
     );
@@ -118,12 +126,7 @@ pub fn get_device_info() -> std::io::Result<Vec<DeviceInfo>> {
                             ifc.ips
                                 .iter()
                                 .find(|ip| ip.ip() == IpAddr::V4(Ipv4Addr::from(p.dst_ip)))
-                                .map(|_| {
-                                    SocketAddr::V4(SocketAddrV4::new(
-                                        Ipv4Addr::from(p.dst_ip),
-                                        p.dst_port,
-                                    ))
-                                })
+                                .map(|_| SocketAddrV4::new(Ipv4Addr::from(p.dst_ip), p.dst_port))
                         })
                     })
                     .inspect(|opt| println!("matched payload_addr: {:?}", opt))
@@ -141,6 +144,83 @@ pub fn get_device_info() -> std::io::Result<Vec<DeviceInfo>> {
     Ok(xgbe_cfg)
 }
 
+pub fn get_device_info(ip: Ipv4Addr) -> Option<DeviceInfo> {
+    let addrs = enumerate_device_addr().ok()?;
+
+    let CmdReplySummary {
+        no_reply: _,
+        invalid_reply: _,
+        normal_reply,
+    } = send_cmd(
+        crate::ctrl_msg::CtrlMsg::XGbeCfgQuery { msg_id: 0 },
+        &addrs,
+        "0.0.0.0:3001",
+        Some(Duration::from_secs(1)),
+        1,
+    );
+
+    let xgbe_cfg = normal_reply
+        .into_iter()
+        .filter(|&(ref a, ref _m)| a.ip() == IpAddr::V4(ip))
+        .map(|(a, r)| {
+            if let CtrlMsg::XGbeCfgQueryReply {
+                msg_id: _,
+                nports: _,
+                cfg,
+            } = r
+            {
+                let payload_addr = cfg
+                    .into_iter()
+                    .map(|p| {
+                        find_iface_by_mac(MacAddr::from(p.dst_mac)).and_then(|ifc| {
+                            ifc.ips
+                                .iter()
+                                .find(|ip| ip.ip() == IpAddr::V4(Ipv4Addr::from(p.dst_ip)))
+                                .map(|_| SocketAddrV4::new(Ipv4Addr::from(p.dst_ip), p.dst_port))
+                        })
+                    })
+                    .inspect(|opt| println!("matched payload_addr: {:?}", opt))
+                    .collect();
+
+                DeviceInfo {
+                    ctrl_addr: a,
+                    payload_addr,
+                }
+            } else {
+                panic!("invalid reply")
+            }
+        })
+        .collect::<Vec<_>>();
+    if xgbe_cfg.len() > 0 {
+        Some(xgbe_cfg[0].clone())
+    } else {
+        None
+    }
+}
+
+pub fn make_sdr16_decim<P: std::fmt::Debug + AsRef<Path>>(
+    ip: Ipv4Addr,
+    local_ctrl_port: u16,
+    port_id: usize,
+    decim_shifts: &[u32],
+    anti_aliasing_shift: u32,
+    init_file: Option<P>,
+) -> Option<(
+    Sdr16Decim,
+    Receiver<LinearOwnedReusable<Payload<Complex<i16>>>>,
+)> {
+    let info = get_device_info(ip)?;
+    let payload_addr = info.payload_addr.get(port_id)?.clone()?;
+    Some(Sdr16Decim::new(
+        SocketAddrV4::new(ip, info.ctrl_addr.port()),
+        SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, local_ctrl_port),
+        payload_addr,
+        decim_shifts,
+        Some(anti_aliasing_shift),
+        init_file
+    ))
+}
+
 #[inline]
 fn ipv4_broadcast(ip: Ipv4Addr, mask: Ipv4Addr) -> Ipv4Addr {
     let ip = u32::from(ip);
@@ -154,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_get_device_info() {
-        let result = get_device_info();
+        let result = get_all_device_info(3001);
 
         assert!(result.is_ok(), "function should not return Err");
 

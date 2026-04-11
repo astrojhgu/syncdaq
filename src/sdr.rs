@@ -1,9 +1,5 @@
 use std::{
-    fs::File,
-    net::{SocketAddrV4, UdpSocket},
-    path::Path,
-    thread::JoinHandle,
-    time::Duration,
+    fs::File, net::{SocketAddrV4, UdpSocket}, path::Path, sync::{Arc, atomic::AtomicBool}, thread::JoinHandle, time::Duration
 };
 
 use num::Complex;
@@ -77,12 +73,14 @@ impl SdrCtrl {
 pub struct Sdr {
     rx_thread: Option<JoinHandle<()>>,
     pub ctrl: SdrCtrl,
+    pub running: Arc<AtomicBool>,
 }
 
 impl Drop for Sdr {
     fn drop(&mut self) {
         eprintln!("dropped");
         self.ctrl.stream_stop();
+        self.running.store(false, std::sync::atomic::Ordering::Relaxed);
         let h = self.rx_thread.take();
         if let Some(h1) = h
             && let Ok(()) = h1.join()
@@ -123,12 +121,15 @@ impl Sdr {
             Some(Duration::from_secs(10)),
             1,
         );
-        let (tx_payload, rx_payload) = bounded::<LinearOwnedReusable<Payload<T>>>(8192);
-        let rx_thread = std::thread::spawn(|| recv_pkt(payload_socket.into(), tx_payload));
+        let running=Arc::new(AtomicBool::new(true));
+        let running1=running.clone();
+        let (tx_payload, rx_payload) = unbounded::<LinearOwnedReusable<Payload<T>>>();
+        let rx_thread = std::thread::spawn(|| recv_pkt(payload_socket.into(), tx_payload, running1));
         (
             Sdr {
                 rx_thread: Some(rx_thread),
                 ctrl,
+                running,
             },
             rx_payload,
         )
@@ -138,12 +139,14 @@ impl Sdr {
 pub struct Sdr16Decim {
     rx_threads: Vec<JoinHandle<()>>,
     pub ctrl: SdrCtrl,
+    pub running: Arc<AtomicBool>,
 }
 
 impl Drop for Sdr16Decim {
     fn drop(&mut self) {
         eprintln!("dropped");
         self.ctrl.stream_stop();
+        self.running.store(false, std::sync::atomic::Ordering::Relaxed);
         for h in self.rx_threads.drain(..) {
             if let Ok(()) = h.join() {
                 eprintln!("rx thread joined");
@@ -193,9 +196,13 @@ impl Sdr16Decim {
             Some(Duration::from_secs(10)),
             1,
         );
-        let (tx_payload, rx_payload) = bounded::<LinearOwnedReusable<Payload<Complex<i16>>>>(8192);
+        let running=Arc::new(AtomicBool::new(true));
+        let running1=running.clone();
+        let nbuf = 256;
+
+        let (tx_payload, rx_payload) = bounded::<LinearOwnedReusable<Payload<Complex<i16>>>>(nbuf);
         let rx_thread =
-            std::thread::spawn(|| recv_pkt::<Complex<i16>>(payload_socket.into(), tx_payload));
+            std::thread::spawn(|| recv_pkt::<Complex<i16>>(payload_socket.into(), tx_payload, running1));
         let fir_coeffs = fir_half_band_coeffs();
         let (mut rx_threads, rx) =
             start_decim_pipeline_chain(rx_payload, &fir_coeffs, decim_shifts);
@@ -203,7 +210,7 @@ impl Sdr16Decim {
 
         let rx = if let Some(anti_aliasing_shift) = anti_aliasing_shift {
             let anti_aliasing_coeffs = fir_anti_aliasing_coeffs();
-            let (tx1, rx1) = unbounded::<LinearOwnedReusable<Payload<Complex<i16>>>>();
+            let (tx1, rx1) = bounded::<LinearOwnedReusable<Payload<Complex<i16>>>>(nbuf);
             let rx_thread = start_fir_pipeline(rx, tx1, &anti_aliasing_coeffs, anti_aliasing_shift);
             rx_threads.push(rx_thread);
             rx1
@@ -211,6 +218,6 @@ impl Sdr16Decim {
             rx
         };
         
-        (Sdr16Decim { rx_threads, ctrl }, rx)
+        (Sdr16Decim { rx_threads, ctrl, running }, rx,)
     }
 }

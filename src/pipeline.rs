@@ -1,4 +1,5 @@
 use std::net::SocketAddrV4;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 use std::{
     net::{Ipv4Addr, UdpSocket},
@@ -116,7 +117,7 @@ impl From<UdpSocket> for MaybeMulticastReceiver {
 pub fn recv_pkt<T>(
     socket: MaybeMulticastReceiver,
     tx_payload: Sender<LinearOwnedReusable<Payload<T>>>,
-    //rx_cmd: Receiver<RecvCmd>,
+    running: Arc<AtomicBool>,
 ) where
     [(); N_BYTE_PER_FRAME / std::mem::size_of::<T>()]: Sized,
     T: Sized + Default + Copy + 'static,
@@ -137,11 +138,11 @@ pub fn recv_pkt<T>(
             v.data.fill(T::default());
         },
     ));
-    //socket.set_nonblocking(true).unwrap();
+    socket.set_nonblocking(true).unwrap();
     socket
-        .set_read_timeout(Some(Duration::from_secs(1)))
+        .set_read_timeout(Some(Duration::from_millis(10)))
         .expect("failed to set timeout");
-    loop {
+    while running.load(std::sync::atomic::Ordering::Relaxed) {
         let mut payload = pool.pull_owned();
         let buf = as_mut_u8_slice(&mut payload as &mut Payload<T>);
         match socket.recv_from(buf) {
@@ -186,7 +187,7 @@ pub fn recv_pkt<T>(
                 //actually = is sufficient.
                 *c = payload.pkt_cnt + 1;
                 if tx_payload.is_full() {
-                    eprint!("O");
+                    //eprint!("O");
                     continue;
                 }
                 nreceived += 1;
@@ -203,7 +204,7 @@ pub fn recv_pkt<T>(
             payload1.copy_header(&payload);
             payload1.pkt_cnt = *c;
             if tx_payload.is_full() {
-                eprint!("O");
+                //eprint!("O");
                 continue;
             }
             nreceived += 1;

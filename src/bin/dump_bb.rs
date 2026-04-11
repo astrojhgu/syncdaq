@@ -2,7 +2,7 @@ use lockfree_object_pool::LinearOwnedReusable;
 use std::{
     fs::File,
     io::{BufWriter, Write},
-    net::UdpSocket,
+    net::UdpSocket, sync::{Arc, atomic::AtomicBool},
 };
 
 use clap::Parser;
@@ -42,7 +42,9 @@ fn main() {
     //let (tx, rx) = bounded::<LinearOwnedReusable<Payload>>(65536);
     let (tx, rx) = unbounded::<LinearOwnedReusable<Payload<u8>>>();
     //let pool1 = Arc::clone(&pool);
-    std::thread::spawn(|| recv_pkt(socket.into(), tx));
+    let running = Arc::new(AtomicBool::new(true));
+
+    std::thread::spawn(|| recv_pkt(socket.into(), tx, running));
 
     let mut npkts_received = 0;
     let mut current_file_no = 0;
