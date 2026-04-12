@@ -198,9 +198,9 @@ impl Sdr16Decim {
         );
         let running=Arc::new(AtomicBool::new(true));
         let running1=running.clone();
-        let nbuf = 256;
+        let nbuf = 128;
 
-        let (tx_payload, rx_payload) = bounded::<LinearOwnedReusable<Payload<Complex<i16>>>>(nbuf);
+        let (tx_payload, rx_payload) = unbounded::<LinearOwnedReusable<Payload<Complex<i16>>>>();
         let rx_thread =
             std::thread::spawn(|| recv_pkt::<Complex<i16>>(payload_socket.into(), tx_payload, running1));
         let fir_coeffs = fir_half_band_coeffs();

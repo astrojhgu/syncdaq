@@ -158,7 +158,7 @@ pub fn recv_pkt<T>(
 
         if now.duration_since(last_print_time) >= print_interval {
             let local_time = Local::now().format("%Y-%m-%d %H:%M:%S");
-            println!(
+            eprintln!(
                 "{local_time} {ndropped} pkts dropped q={} ratio<{:e}",
                 tx_payload.len(),
                 (1 + ndropped) as f64 / nreceived as f64
@@ -184,14 +184,11 @@ pub fn recv_pkt<T>(
         while let Some(ref mut c) = next_cnt {
             //let current_cnt = c + 1;
             if *c >= payload.pkt_cnt {
-                //actually = is sufficient.
+                //actually == is sufficient.
                 *c = payload.pkt_cnt + 1;
-                if tx_payload.is_full() {
-                    //eprint!("O");
-                    continue;
-                }
+
                 nreceived += 1;
-                if let Ok(()) = tx_payload.send(payload) {
+                if tx_payload.send(payload).is_ok() {
                     break;
                 } else {
                     return;
@@ -203,11 +200,9 @@ pub fn recv_pkt<T>(
             let mut payload1 = pool.pull_owned();
             payload1.copy_header(&payload);
             payload1.pkt_cnt = *c;
-            if tx_payload.is_full() {
-                //eprint!("O");
-                continue;
-            }
+
             nreceived += 1;
+
             if tx_payload.send(payload1).is_err() {
                 return;
             }

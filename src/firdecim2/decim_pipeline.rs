@@ -1,5 +1,6 @@
-use std::{sync::Arc, thread::JoinHandle};
+use std::{sync::Arc, thread::JoinHandle, time::{Duration, Instant}};
 
+use chrono::Local;
 use crossbeam::channel::{Receiver, Sender};
 use lockfree_object_pool::{LinearObjectPool, LinearOwnedReusable};
 use num::{Complex, Zero};
@@ -117,15 +118,15 @@ pub fn start_decim_pipeline_chain(
     if n_cascades == 0 {
         (result, recv)
     } else {
-        let (send1, mut recv1) = crossbeam::channel::bounded::<
+        let (send1, mut recv1) = crossbeam::channel::unbounded::<
             lockfree_object_pool::LinearOwnedReusable<Payload<Complex<DTYPE>>>,
-        >(32);
+        >();
         result.push(start_decim_pipeline(recv, send1, fir_coeffs, bit_shifts[0]));
 
         for i in 1..n_cascades {
-            let (send1, recv2) = crossbeam::channel::bounded::<
+            let (send1, recv2) = crossbeam::channel::unbounded::<
                 lockfree_object_pool::LinearOwnedReusable<Payload<Complex<DTYPE>>>,
-            >(4);
+            >();
             let recv = std::mem::replace(&mut recv1, recv2);
             result.push(start_decim_pipeline(recv, send1, fir_coeffs, bit_shifts[i]));
         }
@@ -147,6 +148,8 @@ pub fn start_fir_pipeline(
 
     std::thread::spawn(move || {
         //pin_current_thread();
+        let mut last_print_time = Instant::now();
+        let print_interval = Duration::from_secs(2);
         let ntaps = fir_coeffs.len();
         let state_len = ntaps * 2 - 1 + patch_len; // 2:1 decimation, so input is 2x output
         let mut state = vec![Complex::<DTYPE>::zero(); state_len];
@@ -187,9 +190,33 @@ pub fn start_fir_pipeline(
                 break;
             }
 
-            if send.send(output).is_err() {
-                break;
+            // if send.send(output).is_err() {
+            //     break;
+            // }
+            match send.try_send(output) {
+                Ok(()) => {}
+                Err(e) => {
+                    match e {
+                        crossbeam::channel::TrySendError::Full(_) => {
+                            //dbg!("O");
+                            //eprintln!("q: {}", send.len());
+                            //if the channel is full, we just drop the output and continue. This is to avoid blocking the pipeline.
+                            //this is ok, because this stage is always used in the last step of the pipeline, so dropping some output will not cause any problem.
+                        }
+                        crossbeam::channel::TrySendError::Disconnected(_) => {
+                            break;
+                        }
+                    }
+                }
             }
+
+            let now = Instant::now();
+            if now.duration_since(last_print_time) >= print_interval{
+                let local_time = Local::now().format("%Y-%m-%d %H:%M:%S");
+                eprintln!("{} fir q: {}", local_time, send.len());
+                last_print_time = now;
+            }
+
         }
     })
 }
