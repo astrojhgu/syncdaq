@@ -5,31 +5,25 @@ use lockfree_object_pool::LinearOwnedReusable;
 use num::Complex;
 
 use crate::{
-    ctrl_msg::{CtrlMsg, bcast_cmd},
+    device_discovery::get_device_info,
     payload::{Payload, n_pt_per_frame},
-    sdr::{Sdr, Sdr16Decim},
+    sdr::Sdr16Decim,
 };
 
 use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    simd::{Simd, f32x8, i16x8, num::SimdInt},
+    net::Ipv4Addr,
     slice::{from_raw_parts, from_raw_parts_mut},
-    time::Duration,
 };
 
 #[target_feature(enable = "avx2")]
-unsafe fn convert_i16_to_f32_simd(
-    src: *const i16,
-    dst: *mut f32,
-    n: usize,
-) {
+unsafe fn convert_i16_to_f32_simd(src: *const i16, dst: *mut f32, n: usize) {
     use std::arch::x86_64::*;
 
     let mut i = 0;
 
     while i + 16 <= n {
         // load 16 x i16
-        let v = _mm256_loadu_si256(src.add(i) as *const __m256i);
+        let v = unsafe { _mm256_loadu_si256(src.add(i) as *const __m256i) };
 
         // low 8
         let lo = _mm256_cvtepi16_epi32(_mm256_castsi256_si128(v));
@@ -39,15 +33,15 @@ unsafe fn convert_i16_to_f32_simd(
         let hi = _mm256_cvtepi16_epi32(_mm256_extracti128_si256(v, 1));
         let hi_ps = _mm256_cvtepi32_ps(hi);
 
-        _mm256_storeu_ps(dst.add(i), lo_ps);
-        _mm256_storeu_ps(dst.add(i + 8), hi_ps);
+        unsafe { _mm256_storeu_ps(dst.add(i), lo_ps) };
+        unsafe { _mm256_storeu_ps(dst.add(i + 8), hi_ps) };
 
         i += 16;
     }
 
     // tail
     while i < n {
-        *dst.add(i) = *src.add(i) as f32;
+        unsafe { *dst.add(i) = *src.add(i) as f32 };
         i += 1;
     }
 }
@@ -69,7 +63,7 @@ pub struct CComplexF32 {
 
 pub struct CSdr16Decim {
     sdr_dev: Sdr16Decim,
-    rx_payload: Receiver<LinearOwnedReusable<Payload<Complex<i16>>>>,
+    rx_payload: Option<Receiver<LinearOwnedReusable<Payload<Complex<i16>>>>>,
     buffer: Option<LinearOwnedReusable<Payload<Complex<i16>>>>,
     cursor: usize,
 }
@@ -82,35 +76,39 @@ pub unsafe extern "C" fn fetch_data_16(csdr: *mut CSdr16Decim, buf: *mut CComple
 
     let obj = unsafe { &mut *csdr };
     let buf = unsafe { std::slice::from_raw_parts_mut(buf as *mut Complex<i16>, npt) };
-    if obj.buffer.is_none() {
-        obj.buffer = Some(obj.rx_payload.recv().unwrap());
-        if obj.rx_payload.len() >= 16 {
-            println!("almost full");
-        }
-        obj.cursor = 0;
-    }
-
-    let mut written = 0;
-    let total = npt;
-    while written < total {
-        let available = n_pt_per_frame::<i16>() - obj.cursor;
-        if available == 0 {
-            obj.buffer = Some(obj.rx_payload.recv().unwrap());
+    if let Some(ref mut rx_payload) = obj.rx_payload {
+        if obj.buffer.is_none() {
+            obj.buffer = Some(rx_payload.recv().unwrap());
+            if rx_payload.len() >= 16 {
+                println!("almost full");
+            }
             obj.cursor = 0;
-            continue;
         }
-        let copy_len = (total - written).min(available);
-        // let buf_ci16 = unsafe {
-        //     from_raw_parts(
-        //         obj.buffer.as_ref().unwrap().data.as_ptr() as *const Complex<i16>,
-        //         n_pt_per_frame::<i16>(),
-        //     )
-        // };
-        let buf_ci16 = &obj.buffer.as_ref().unwrap().data;
-        buf[written..written + copy_len]
-            .copy_from_slice(&buf_ci16[obj.cursor..obj.cursor + copy_len]);
-        obj.cursor += copy_len;
-        written += copy_len;
+
+        let mut written = 0;
+        let total = npt;
+        while written < total {
+            let available = n_pt_per_frame::<i16>() - obj.cursor;
+            if available == 0 {
+                obj.buffer = Some(rx_payload.recv().unwrap());
+                obj.cursor = 0;
+                continue;
+            }
+            let copy_len = (total - written).min(available);
+            // let buf_ci16 = unsafe {
+            //     from_raw_parts(
+            //         obj.buffer.as_ref().unwrap().data.as_ptr() as *const Complex<i16>,
+            //         n_pt_per_frame::<i16>(),
+            //     )
+            // };
+            let buf_ci16 = &obj.buffer.as_ref().unwrap().data;
+            buf[written..written + copy_len]
+                .copy_from_slice(&buf_ci16[obj.cursor..obj.cursor + copy_len]);
+            obj.cursor += copy_len;
+            written += copy_len;
+        }
+    } else {
+        panic!("recv thread must be started before hand");
     }
 }
 
@@ -124,42 +122,53 @@ pub unsafe extern "C" fn fetch_data_cf32(
         return;
     }
 
-    let obj = &mut *csdr;
+    let obj = unsafe { &mut *csdr };
 
-    let buf = std::slice::from_raw_parts_mut(buf, npt);
+    let buf = unsafe { std::slice::from_raw_parts_mut(buf, npt) };
 
-    if obj.buffer.is_none() {
-        obj.buffer = Some(obj.rx_payload.recv().unwrap());
-        obj.cursor = 0;
-    }
-
-    let mut written = 0;
-    let total = npt;
-
-    while written < total {
-        let available = n_pt_per_frame::<i16>() - obj.cursor;
-
-        if available == 0 {
-            obj.buffer = Some(obj.rx_payload.recv().unwrap());
+    if let Some(ref mut rx_payload) = obj.rx_payload {
+        if obj.buffer.is_none() {
+            let x = match rx_payload.recv() {
+                Ok(x) => x,
+                Err(e) => {
+                    eprintln!("{}", e);
+                    panic!("{}", e)
+                }
+            };
+            obj.buffer = Some(x);
             obj.cursor = 0;
-            continue;
         }
 
-        let copy_len = (total - written).min(available);
+        let mut written = 0;
+        let total = npt;
 
-        let src = &obj.buffer.as_ref().unwrap().data;
+        while written < total {
+            let available = n_pt_per_frame::<i16>() - obj.cursor;
 
-        // ⚠️ reinterpret 为 i16 流
-        let src_ptr = src.as_ptr().add(obj.cursor) as *const i16;
-        let dst_ptr = buf.as_mut_ptr().add(written) as *mut f32;
+            if available == 0 {
+                obj.buffer = Some(rx_payload.recv().unwrap());
+                obj.cursor = 0;
+                continue;
+            }
 
-        // 每个 Complex = 2 个 i16
-        let n_scalar = copy_len * 2;
+            let copy_len = (total - written).min(available);
 
-        convert_i16_to_f32_simd(src_ptr, dst_ptr, n_scalar);
+            let src = &obj.buffer.as_ref().unwrap().data;
 
-        obj.cursor += copy_len;
-        written += copy_len;
+            // ⚠️ reinterpret 为 i16 流
+            let src_ptr = unsafe { src.as_ptr().add(obj.cursor) } as *const i16;
+            let dst_ptr = unsafe { buf.as_mut_ptr().add(written) } as *mut f32;
+
+            // 每个 Complex = 2 个 i16
+            let n_scalar = copy_len * 2;
+
+            unsafe { convert_i16_to_f32_simd(src_ptr, dst_ptr, n_scalar) };
+
+            obj.cursor += copy_len;
+            written += copy_len;
+        }
+    } else {
+        panic!("recv thread must be started before hand");
     }
 }
 
@@ -171,12 +180,39 @@ pub extern "C" fn get_mtu() -> usize {
     n_pt_per_frame::<i16>()
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn setup_data_stream(
+    csdr: *mut CSdr16Decim,
+    decim_shifts: *const u32,
+    ndecim_stages: usize,
+    fir_shift: u32,
+) {
+    if csdr.is_null() {
+        dbg!("null dev");
+        return;
+    }
+    //let obj = unsafe { &mut *csdr };
+    let obj = unsafe { &mut *csdr };
+
+    let decim_shifts = unsafe { from_raw_parts(decim_shifts, ndecim_stages) };
+    //let decim_shifts = [12];
+    //let fir_shift = 5;
+    obj.rx_payload = Some(obj.sdr_dev.setup_stream(&decim_shifts, Some(fir_shift)));
+}
+
 /// # Safety
 ///
 /// This function should not be called before the horsemen are ready.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn start_data_stream(csdr: *mut CSdr16Decim) {
+    if csdr.is_null() {
+        dbg!("null dev");
+        return;
+    }
     let obj = unsafe { &mut *csdr };
+    assert!(obj.rx_payload.is_some());
+
+    //let decim_shifts = unsafe { from_raw_parts(decim_shifts, ndecim_stages) };
     obj.sdr_dev.ctrl.stream_start();
 }
 
@@ -185,6 +221,10 @@ pub unsafe extern "C" fn start_data_stream(csdr: *mut CSdr16Decim) {
 /// This function should not be called before the horsemen are ready.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_mixer_freq(csdr: *mut CSdr16Decim, freq_mega_hz: f64, sync: u32) {
+    if csdr.is_null() {
+        dbg!("null dev");
+        return;
+    }
     let obj = unsafe { &mut *csdr };
     obj.sdr_dev.ctrl.set_mixer_freq(freq_mega_hz, sync);
 }
@@ -194,8 +234,14 @@ pub unsafe extern "C" fn set_mixer_freq(csdr: *mut CSdr16Decim, freq_mega_hz: f6
 /// This function should not be called before the horsemen are ready.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn stop_data_stream(csdr: *mut CSdr16Decim) {
+    if csdr.is_null() {
+        dbg!("null dev");
+        return;
+    }
     let obj = unsafe { &mut *csdr };
+    obj.sdr_dev.destroy_recv_thread();
     obj.sdr_dev.ctrl.stream_stop();
+    obj.rx_payload = None;
 }
 
 /// # Safety
@@ -223,6 +269,12 @@ pub unsafe extern "C" fn find_all_devices(
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn device_is_alive(ip: u32) -> bool {
+    let ip = Ipv4Addr::from(ip);
+    get_device_info(Ipv4Addr::from(ip)).is_some()
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn use_payload_ci16(_p: Payload<CComplex>) {}
 
 #[unsafe(no_mangle)]
@@ -230,13 +282,9 @@ pub extern "C" fn make_sdr16_decim_u32(
     ip_u32: u32,
     local_ctrl_port: u16,
     port_id: usize,
-    decim_shifts: *const u32,
-    ndecim_shifts: usize,
-    anti_aliasing_shift: u32,
     cfg_file: *const std::ffi::c_char,
 ) -> *mut CSdr16Decim {
     let ip = Ipv4Addr::from(ip_u32);
-    let decim_shifts = unsafe { from_raw_parts(decim_shifts, ndecim_shifts) };
     let c_str = if cfg_file.is_null() {
         None
     } else {
@@ -247,23 +295,16 @@ pub extern "C" fn make_sdr16_decim_u32(
         )
     };
 
-    crate::device_discovery::make_sdr16_decim(
-        ip,
-        local_ctrl_port,
-        port_id,
-        decim_shifts,
-        anti_aliasing_shift,
-        c_str,
-    )
-    .map(|(sdr_dev, rx_payload)| CSdr16Decim {
-        sdr_dev,
-        rx_payload,
-        buffer: None,
-        cursor: 0,
-    })
-    .map(Box::new)
-    .map(Box::into_raw)
-    .unwrap_or(std::ptr::null_mut())
+    crate::device_discovery::make_sdr16_decim(ip, local_ctrl_port, port_id, c_str)
+        .map(|sdr_dev| CSdr16Decim {
+            sdr_dev,
+            rx_payload: None,
+            buffer: None,
+            cursor: 0,
+        })
+        .map(Box::new)
+        .map(Box::into_raw)
+        .unwrap_or(std::ptr::null_mut())
 }
 
 #[unsafe(no_mangle)]
@@ -271,13 +312,9 @@ pub extern "C" fn make_sdr16_decim(
     ip: &[u8; 4],
     local_ctrl_port: u16,
     port_id: usize,
-    decim_shifts: *const u32,
-    ndecim_shifts: usize,
-    anti_aliasing_shift: u32,
     cfg_file: *const std::ffi::c_char,
 ) -> *mut CSdr16Decim {
     let ip = Ipv4Addr::from(*ip);
-    let decim_shifts = unsafe { from_raw_parts(decim_shifts, ndecim_shifts) };
     let c_str = if cfg_file.is_null() {
         None
     } else {
@@ -288,23 +325,16 @@ pub extern "C" fn make_sdr16_decim(
         )
     };
 
-    crate::device_discovery::make_sdr16_decim(
-        ip,
-        local_ctrl_port,
-        port_id,
-        decim_shifts,
-        anti_aliasing_shift,
-        c_str,
-    )
-    .map(|(sdr_dev, rx_payload)| CSdr16Decim {
-        sdr_dev,
-        rx_payload,
-        buffer: None,
-        cursor: 0,
-    })
-    .map(Box::new)
-    .map(Box::into_raw)
-    .unwrap_or(std::ptr::null_mut())
+    crate::device_discovery::make_sdr16_decim(ip, local_ctrl_port, port_id, c_str)
+        .map(|sdr_dev| CSdr16Decim {
+            sdr_dev,
+            rx_payload: None,
+            buffer: None,
+            cursor: 0,
+        })
+        .map(Box::new)
+        .map(Box::into_raw)
+        .unwrap_or(std::ptr::null_mut())
 }
 
 #[unsafe(no_mangle)]

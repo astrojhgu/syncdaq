@@ -4,18 +4,13 @@ use std::{
     time::Duration,
 };
 
-use crossbeam::channel::Receiver;
 use if_addrs::{IfAddr, get_if_addrs};
-
-use lockfree_object_pool::LinearOwnedReusable;
-use num::Complex;
 use pnet_datalink::MacAddr;
 use pnet_datalink::NetworkInterface;
 use pnet_datalink::interfaces;
 
 use crate::{
     ctrl_msg::{CmdReplySummary, CtrlMsg, send_cmd},
-    payload::Payload,
     sdr::Sdr16Decim,
 };
 
@@ -202,22 +197,15 @@ pub fn make_sdr16_decim<P: std::fmt::Debug + AsRef<Path>>(
     ip: Ipv4Addr,
     local_ctrl_port: u16,
     port_id: usize,
-    decim_shifts: &[u32],
-    anti_aliasing_shift: u32,
     init_file: Option<P>,
-) -> Option<(
-    Sdr16Decim,
-    Receiver<LinearOwnedReusable<Payload<Complex<i16>>>>,
-)> {
+) -> Option<Sdr16Decim> {
     let info = get_device_info(ip)?;
     let payload_addr = info.payload_addr.get(port_id)?.clone()?;
     Some(Sdr16Decim::new(
         SocketAddrV4::new(ip, info.ctrl_addr.port()),
         SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, local_ctrl_port),
         payload_addr,
-        decim_shifts,
-        Some(anti_aliasing_shift),
-        init_file
+        init_file,
     ))
 }
 
