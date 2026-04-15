@@ -201,6 +201,7 @@ pub fn make_sdr16_decim<P: std::fmt::Debug + AsRef<Path>>(
 ) -> Option<Sdr16Decim> {
     let info = get_device_info(ip)?;
     let payload_addr = info.payload_addr.get(port_id)?.clone()?;
+    println!("Creating Sdr16Decim with ctrl_addr={} and payload_addr={}", info.ctrl_addr, payload_addr);
     Some(Sdr16Decim::new(
         SocketAddrV4::new(ip, info.ctrl_addr.port()),
         SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, local_ctrl_port),

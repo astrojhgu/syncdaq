@@ -5,7 +5,7 @@ use crossbeam::channel::{Receiver, Sender};
 use lockfree_object_pool::{LinearObjectPool, LinearOwnedReusable};
 use num::{Complex, Zero};
 
-use crate::firdecim2::firdec_worker::fir_symmetric_full_rate;
+use crate::{firdecim2::firdec_worker::fir_symmetric_full_rate, utils::pin_current_thread};
 
 use super::{
     super::payload::{N_BYTE_PER_FRAME, Payload},
@@ -13,16 +13,6 @@ use super::{
     firdec_worker::resample2,
 };
 
-//use core_affinity;
-
-// fn pin_current_thread() {
-//     let cpu = unsafe { libc::sched_getcpu() };
-
-//     let cores = core_affinity::get_core_ids().unwrap();
-//     let core = cores.into_iter().find(|c| c.id == cpu as usize).unwrap();
-
-//     core_affinity::set_for_current(core);
-// }
 
 type DTYPE = i16;
 
@@ -39,7 +29,7 @@ pub fn start_decim_pipeline(
     let patch_len = N_BYTE_PER_FRAME / std::mem::size_of::<Complex<DTYPE>>();
 
     std::thread::spawn(move || {
-        //pin_current_thread();
+        pin_current_thread();
         let ntaps = fir_coeffs.len();
         let state_len = ntaps * 2 - 2 + patch_len; // 2:1 decimation, so input is 2x output
         let mut state = vec![Complex::<DTYPE>::zero(); state_len];
@@ -147,7 +137,7 @@ pub fn start_fir_pipeline(
     let patch_len = N_BYTE_PER_FRAME / std::mem::size_of::<Complex<DTYPE>>();
 
     std::thread::spawn(move || {
-        //pin_current_thread();
+        pin_current_thread();
         let mut last_print_time = Instant::now();
         let print_interval = Duration::from_secs(2);
         let ntaps = fir_coeffs.len();

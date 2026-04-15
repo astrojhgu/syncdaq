@@ -21,6 +21,7 @@ use crate::{
     },
     payload::{N_BYTE_PER_FRAME, Payload},
     pipeline::recv_pkt,
+    utils::pin_current_thread,
 };
 
 pub struct SdrCtrl {
@@ -137,7 +138,9 @@ impl Sdr {
         let running1 = running.clone();
         let (tx_payload, rx_payload) = unbounded::<LinearOwnedReusable<Payload<T>>>();
         let rx_thread =
-            std::thread::spawn(|| recv_pkt(payload_socket.into(), tx_payload, running1));
+            std::thread::spawn(|| {
+                pin_current_thread();
+                recv_pkt(payload_socket.into(), tx_payload, running1)});
         (
             Sdr {
                 rx_thread: Some(rx_thread),

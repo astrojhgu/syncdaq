@@ -155,3 +155,14 @@ where
     // 3. 将 Receiver 包装回 Stream 返回
     ReceiverStream::new(rx)
 }
+
+use core_affinity;
+
+pub fn pin_current_thread() {
+    let cpu = unsafe { libc::sched_getcpu() };
+
+    let cores = core_affinity::get_core_ids().unwrap();
+    let core = cores.into_iter().find(|c| c.id == cpu as usize).unwrap();
+
+    core_affinity::set_for_current(core);
+}

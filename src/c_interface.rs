@@ -185,7 +185,7 @@ pub unsafe extern "C" fn setup_data_stream(
     csdr: *mut CSdr16Decim,
     decim_shifts: *const u32,
     ndecim_stages: usize,
-    fir_shift: u32,
+    fir_shift: i32,
 ) {
     if csdr.is_null() {
         dbg!("null dev");
@@ -197,7 +197,7 @@ pub unsafe extern "C" fn setup_data_stream(
     let decim_shifts = unsafe { from_raw_parts(decim_shifts, ndecim_stages) };
     //let decim_shifts = [12];
     //let fir_shift = 5;
-    obj.rx_payload = Some(obj.sdr_dev.setup_stream(&decim_shifts, Some(fir_shift)));
+    obj.rx_payload = Some(obj.sdr_dev.setup_stream(&decim_shifts, if fir_shift>=0 {Some(fir_shift as u32)} else {None}));
 }
 
 /// # Safety
