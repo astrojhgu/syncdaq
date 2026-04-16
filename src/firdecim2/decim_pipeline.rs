@@ -102,27 +102,19 @@ pub fn start_decim_pipeline_chain(
     Vec<JoinHandle<()>>,
     Receiver<LinearOwnedReusable<Payload<Complex<DTYPE>>>>,
 ) {
-    let n_cascades = bit_shifts.len();
-    let mut result = Vec::with_capacity(n_cascades);
-
-    if n_cascades == 0 {
-        (result, recv)
-    } else {
-        let (send1, mut recv1) = crossbeam::channel::unbounded::<
-            lockfree_object_pool::LinearOwnedReusable<Payload<Complex<DTYPE>>>,
-        >();
-        result.push(start_decim_pipeline(recv, send1, fir_coeffs, bit_shifts[0]));
-
-        for i in 1..n_cascades {
-            let (send1, recv2) = crossbeam::channel::unbounded::<
-                lockfree_object_pool::LinearOwnedReusable<Payload<Complex<DTYPE>>>,
-            >();
-            let recv = std::mem::replace(&mut recv1, recv2);
-            result.push(start_decim_pipeline(recv, send1, fir_coeffs, bit_shifts[i]));
+    bit_shifts.iter().fold((Vec::with_capacity(bit_shifts.len()), recv), 
+        |(mut handles, curr_recv), &shift| {
+            let (send_next, recv_next) = crossbeam::channel::unbounded();
+            
+            // 启动当前阶段，传入 curr_recv，产生新的 handle
+            handles.push(start_decim_pipeline(curr_recv, send_next, fir_coeffs, shift));
+            
+            // 返回更新后的元组，供下一轮使用
+            (handles, recv_next)
         }
-        (result, recv1)
-    }
+    )
 }
+
 
 pub fn start_fir_pipeline(
     recv: Receiver<LinearOwnedReusable<Payload<Complex<DTYPE>>>>,
