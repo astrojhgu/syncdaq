@@ -66,6 +66,8 @@ pub struct CSdr16Decim {
     rx_payload: Option<Receiver<LinearOwnedReusable<Payload<Complex<i16>>>>>,
     buffer: Option<LinearOwnedReusable<Payload<Complex<i16>>>>,
     cursor: usize,
+    decim_shifts: Vec<u32>,
+    fir_shift: Option<u32>,
 }
 
 #[unsafe(no_mangle)]
@@ -194,10 +196,16 @@ pub unsafe extern "C" fn setup_data_stream(
     //let obj = unsafe { &mut *csdr };
     let obj = unsafe { &mut *csdr };
 
-    let decim_shifts = unsafe { from_raw_parts(decim_shifts, ndecim_stages) };
+    obj.decim_shifts = unsafe { from_raw_parts(decim_shifts, ndecim_stages) }.to_vec();
+    obj.fir_shift = if fir_shift >= 0 {
+        Some(fir_shift as u32)
+    } else {
+        None
+    };
+
     //let decim_shifts = [12];
     //let fir_shift = 5;
-    obj.rx_payload = Some(obj.sdr_dev.setup_stream(&decim_shifts, if fir_shift>=0 {Some(fir_shift as u32)} else {None}));
+    obj.rx_payload = Some(obj.sdr_dev.setup_stream(&obj.decim_shifts, obj.fir_shift));
 }
 
 /// # Safety
@@ -210,8 +218,11 @@ pub unsafe extern "C" fn start_data_stream(csdr: *mut CSdr16Decim) {
         return;
     }
     let obj = unsafe { &mut *csdr };
-    assert!(obj.rx_payload.is_some());
 
+    if obj.rx_payload.is_none() {
+        obj.rx_payload = Some(obj.sdr_dev.setup_stream(&obj.decim_shifts, obj.fir_shift));
+    }
+    assert!(obj.rx_payload.is_some());
     //let decim_shifts = unsafe { from_raw_parts(decim_shifts, ndecim_stages) };
     obj.sdr_dev.ctrl.stream_start();
 }
@@ -301,6 +312,8 @@ pub extern "C" fn make_sdr16_decim_u32(
             rx_payload: None,
             buffer: None,
             cursor: 0,
+            fir_shift: None,
+            decim_shifts: Vec::default(),
         })
         .map(Box::new)
         .map(Box::into_raw)
@@ -331,6 +344,8 @@ pub extern "C" fn make_sdr16_decim(
             rx_payload: None,
             buffer: None,
             cursor: 0,
+            fir_shift: None,
+            decim_shifts: Vec::default(),
         })
         .map(Box::new)
         .map(Box::into_raw)
@@ -346,6 +361,8 @@ pub unsafe extern "C" fn free_sdr_device(csdr: *mut CSdr16Decim) {
             rx_payload,
             buffer: _,
             cursor: _,
+            decim_shifts: _,
+            fir_shift: _,
         } = *obj;
         drop(rx_payload);
     }
