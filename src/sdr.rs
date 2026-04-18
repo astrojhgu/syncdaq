@@ -137,10 +137,10 @@ impl Sdr {
         let running = Arc::new(AtomicBool::new(true));
         let running1 = running.clone();
         let (tx_payload, rx_payload) = unbounded::<LinearOwnedReusable<Payload<T>>>();
-        let rx_thread =
-            std::thread::spawn(|| {
-                pin_current_thread();
-                recv_pkt(payload_socket.into(), tx_payload, running1)});
+        let rx_thread = std::thread::spawn(|| {
+            pin_current_thread();
+            recv_pkt(payload_socket.into(), tx_payload, running1)
+        });
         (
             Sdr {
                 rx_thread: Some(rx_thread),
@@ -163,6 +163,7 @@ impl Drop for Sdr16Decim {
     fn drop(&mut self) {
         eprintln!("dropped");
         self.destroy_recv_thread();
+        self.ctrl.stream_stop();
         // let h = self.rx_thread.take();
         // if let Some(h1) = h
         //     && let Ok(()) = h1.join()
@@ -211,16 +212,16 @@ impl Sdr16Decim {
     }
 
     pub fn destroy_recv_thread(&mut self) {
-        self.ctrl.stream_stop();
+        //self.ctrl.stream_stop();
         self.running
             .store(false, std::sync::atomic::Ordering::Relaxed);
         let mut rx_threads = self.rx_threads.take();
         if let Some(ref mut rx_threads) = rx_threads {
             for h in rx_threads.drain(..) {
                 if let Ok(()) = h.join() {
-                    eprintln!("rx thread joined");
+                    //eprintln!("rx thread joined");
                 } else {
-                    eprintln!("failed to join rx thread");
+                    //eprintln!("failed to join rx thread");
                 }
             }
         }

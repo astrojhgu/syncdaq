@@ -67,14 +67,13 @@ fn main() {
         Some("/home/user/src/syncdaq/init_rfsoc.yaml"),
     );
     sdr.ctrl.set_mixer_freq(args.freq, 0);
-
+    sdr.ctrl.stream_start();
     let mut shifts = vec![0; args.ndecim];
 
     for i in 0..args.ndecim {
         for d in 0..=24 {
             shifts[i] = d;
             let rx = sdr.setup_stream(&shifts[..=i], None);
-            sdr.ctrl.stream_start();
             let mut good = true;
             for _j in 0..args.nbuf {
                 let payload = rx.recv().unwrap();
@@ -85,8 +84,8 @@ fn main() {
                     good = false;
                 }
             }
-            sdr.ctrl.stream_stop();
             if good {
+                println!("shifts={}", shifts.iter().format(":"));
                 break;
             }
         }
@@ -99,7 +98,6 @@ fn main() {
         for d in 0..=24 {
             fir_shift = d;
             let rx = sdr.setup_stream(&shifts, Some(fir_shift));
-            sdr.ctrl.stream_start();
             let mut good = true;
             for _j in 0..args.nbuf {
                 let payload = rx.recv().unwrap();
@@ -110,8 +108,9 @@ fn main() {
                     good = false;
                 }
             }
-            sdr.ctrl.stream_stop();
+
             if good {
+                println!("firshift={}", fir_shift);
                 break;
             }
         }
