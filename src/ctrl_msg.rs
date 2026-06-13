@@ -90,35 +90,35 @@ impl Display for Health {
                 ref pkt_cnt2,
                 ref axi_frame_cnt2,
             } => {
-                write!(f, "T510Health{{")?;
-                write!(f, "rfdc_restart_cnt: {}, ", rfdc_restart_cnt)?;
-                write!(f, "temperature: {} degC, ", temperature)?;
-                write!(f, "nports: {}, ", nports)?;
-                write!(f, "fifo_full_cnt: {}, ", fifo_full_cnt >> 16)?;
-                write!(f, "fifo_len: {}, ", fifo_full_cnt & 0xffff)?;
-                write!(f, "pkt_cnt1: [")?;
+                writeln!(f, "T510Health{{")?;
+                writeln!(f, "rfdc_restart_cnt: {}, ", rfdc_restart_cnt)?;
+                writeln!(f, "temperature: {} degC, ", temperature)?;
+                writeln!(f, "nports: {}, ", nports)?;
+                writeln!(f, "fifo_full_cnt: {}, ", fifo_full_cnt >> 16)?;
+                writeln!(f, "fifo_len: {}, ", fifo_full_cnt & 0xffff)?;
+                write!(f, "pkt_cnt1: \t\t[")?;
                 for x in pkt_cnt1 {
                     write!(f, "{}, ", x)?;
                 }
-                write!(f, "], ")?;
-                write!(f, "axi_frame_cnt1: [")?;
+                writeln!(f, "], ")?;
+                write!(f, "axi_frame_cnt1: \t[")?;
                 for x in axi_frame_cnt1 {
                     write!(f, "{}, ", x)?;
                 }
-                write!(f, "], ")?;
-                write!(f, "pkt_cnt2: [")?;
+                writeln!(f, "], ")?;
+                write!(f, "pkt_cnt2: \t\t[")?;
                 for x in pkt_cnt2 {
                     write!(f, "{}, ", x)?;
                 }
-                write!(f, "], ")?;
-                write!(f, "axi_frame_cnt2: [")?;
+                writeln!(f, "], ")?;
+                write!(f, "axi_frame_cnt2: \t[")?;
                 for x in axi_frame_cnt2 {
                     write!(f, "{}, ", x)?;
                 }
-                write!(f, "]")?;
+                writeln!(f, "]")?;
             }
         }
-        write!(f, "}}")
+        writeln!(f, "}}")
     }
 }
 
@@ -279,10 +279,31 @@ pub enum CtrlMsg {
     PortMask { msg_id: u32, mask: u32 },
     #[brw(magic(0xff_00_00_0e_u32))]
     PortMaskReply { msg_id: u32 },
+    #[brw(magic(0x00_00_10_01_u32))]
+    QsfpInfo { msg_id: u32 },
+    #[brw(magic(0xff_00_10_01_u32))]
+    QsfpInfoReply {
+        msg_id: u32,
+        temperature: f32,
+        vcc: f32,
+        tx_bias: [f32; 4],
+        rx_power: [f32; 4],
+        tx_power: [f32; 4],
+        los_lol: [u8; 4], //{tx los, rx los}, 0, {tx_lol, rx_lol}, 0
+        vcc_temp_alarm: [u8; 4],
+    },
     #[brw(magic(0x00_00_00_ff_u32))]
     Reboot { msg_id: u32 },
     #[brw(magic(0xff_00_00_ff_u32))]
     RebootReply { msg_id: u32 },
+}
+
+fn bits_to_string(x: u8) -> String {
+    let mut s = String::with_capacity(8);
+    for i in (0..8).rev() {
+        s.push_str(&(((x >> i) & 1).to_string()));
+    }
+    s
 }
 
 impl Display for CtrlMsg {
@@ -323,7 +344,14 @@ impl Display for CtrlMsg {
 
                 write!(
                     f,
-                    "QueryReply{{msg_id: {msg_id}, fm_ver: 0x{fm_ver:x} ({year}-{month:02}-{day:02} {hour}:{minute}:{second:02}), tick_cnt1: {tick_cnt1}, tick_cnt2: {tick_cnt2}, trans_state: 0x{trans_state:x}, locked: 0x{locked:x}, Health: {health}"
+                    "QueryReply{{
+                    msg_id: {msg_id},
+                    fm_ver: 0x{fm_ver:x} ({year}-{month:02}-{day:02} {hour}:{minute}:{second:02}),
+                    tick_cnt1: {tick_cnt1},
+                    tick_cnt2: {tick_cnt2},
+                    trans_state: 0x{trans_state:x},
+                    locked: 0x{locked:x},
+                    Health: {health}"
                 )?;
                 writeln!(f, "}}")?;
                 if *locked & 0x00_00_00_0f != 0x0f {
@@ -566,6 +594,43 @@ impl Display for CtrlMsg {
             CtrlMsg::PortMaskReply { msg_id } => {
                 writeln!(f, "PortMaskReply{{msg_id:{msg_id}}}")
             }
+            CtrlMsg::QsfpInfo { msg_id } => {
+                writeln!(f, "QsfpInfo{{msg_id:{msg_id}}}")
+            }
+            CtrlMsg::QsfpInfoReply {
+                msg_id,
+                temperature,
+                vcc,
+                tx_bias,
+                rx_power,
+                tx_power,
+                los_lol,
+                vcc_temp_alarm,
+            } => {
+                writeln!(
+                    f,
+                    "QsfpInfoReply{{
+                    msg_id: {msg_id},
+                    temperature: {temperature},
+                    vcc:{vcc},
+                    tx_bias: {tx_bias:?},
+                    rx_power: {rx_power:?},
+                    tx_power: {tx_power:?},
+                    los: {},
+                    lol: {},
+                    temp_alarm:{},
+                    l_temp_alarm:{},
+                    vcc_alarm:{},
+                    l_vcc_alarm:{},
+                    }}",
+                    bits_to_string(los_lol[0]),
+                    bits_to_string(los_lol[2]),
+                    bits_to_string(vcc_temp_alarm[0]),
+                    bits_to_string(vcc_temp_alarm[1]),
+                    bits_to_string(vcc_temp_alarm[2]),
+                    bits_to_string(vcc_temp_alarm[3]),
+                )
+            }
             CtrlMsg::Reboot { msg_id } => {
                 writeln!(f, "Reboot{{msg_id:{msg_id}}}")
             }
@@ -626,6 +691,8 @@ impl CtrlMsg {
             MixerSetReply { msg_id } => *msg_id = mid,
             PortMask { msg_id, .. } => *msg_id = mid,
             PortMaskReply { msg_id } => *msg_id = mid,
+            QsfpInfo { msg_id } => *msg_id = mid,
+            QsfpInfoReply { msg_id, .. } => *msg_id = mid,
             Reboot { msg_id, .. } => *msg_id = mid,
             RebootReply { msg_id, .. } => *msg_id = mid,
         }
@@ -683,6 +750,8 @@ impl CtrlMsg {
             MixerSetReply { msg_id } => *msg_id,
             PortMask { msg_id, .. } => *msg_id,
             PortMaskReply { msg_id } => *msg_id,
+            QsfpInfo { msg_id } => *msg_id,
+            QsfpInfoReply { msg_id, .. } => *msg_id,
             Reboot { msg_id, .. } => *msg_id,
             RebootReply { msg_id, .. } => *msg_id,
         }
