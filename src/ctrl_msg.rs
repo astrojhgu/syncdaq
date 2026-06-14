@@ -284,6 +284,10 @@ pub enum CtrlMsg {
     #[brw(magic(0xff_00_10_01_u32))]
     QsfpInfoReply {
         msg_id: u32,
+        restl: u32,
+        modsell: u32,
+        lpmode: u32,
+        modpresent: u32,
         temperature: f32,
         vcc: f32,
         tx_bias: [f32; 4],
@@ -291,6 +295,20 @@ pub enum CtrlMsg {
         tx_power: [f32; 4],
         los_lol: [u8; 4], //{tx los, rx los}, 0, {tx_lol, rx_lol}, 0
         vcc_temp_alarm: [u8; 4],
+    },
+    #[brw(magic(0x00_00_10_02_u32))]
+    QsfpSet {
+        msg_id: u32,
+        restl: u32,
+        modsell: u32,
+        lpmode: u32,
+    },
+    #[brw(magic(0xff_00_10_02_u32))]
+    QsfpSetReply {
+        msg_id: u32,
+        restl: u32,
+        modsell: u32,
+        lpmode: u32,
     },
     #[brw(magic(0x00_00_00_ff_u32))]
     Reboot { msg_id: u32 },
@@ -599,6 +617,10 @@ impl Display for CtrlMsg {
             }
             CtrlMsg::QsfpInfoReply {
                 msg_id,
+                restl,
+                modsell,
+                lpmode,
+                modpresent,
                 temperature,
                 vcc,
                 tx_bias,
@@ -622,6 +644,10 @@ impl Display for CtrlMsg {
                     l_temp_alarm:{},
                     vcc_alarm:{},
                     l_vcc_alarm:{},
+                    restl:{restl},
+                    modsell:{modsell},
+                    lpmode:{lpmode},
+                    modpresent:{modpresent},
                     }}",
                     bits_to_string(los_lol[0]),
                     bits_to_string(los_lol[2]),
@@ -629,6 +655,38 @@ impl Display for CtrlMsg {
                     bits_to_string(vcc_temp_alarm[1]),
                     bits_to_string(vcc_temp_alarm[2]),
                     bits_to_string(vcc_temp_alarm[3]),
+                )
+            }
+            CtrlMsg::QsfpSet {
+                msg_id,
+                restl,
+                modsell,
+                lpmode,
+            } => {
+                writeln!(
+                    f,
+                    "QsfpSet{{
+                    msg_id: {msg_id},
+                    restl: {restl},
+                    modsell: {modsell},
+                    lpmode: {lpmode},
+                }}"
+                )
+            }
+            CtrlMsg::QsfpSetReply {
+                msg_id,
+                restl,
+                modsell,
+                lpmode,
+            } => {
+                writeln!(
+                    f,
+                    "QsfpSet{{
+                    msg_id: {msg_id},
+                    restl: {restl},
+                    modsell: {modsell},
+                    lpmode: {lpmode},
+            }}"
                 )
             }
             CtrlMsg::Reboot { msg_id } => {
@@ -693,6 +751,8 @@ impl CtrlMsg {
             PortMaskReply { msg_id } => *msg_id = mid,
             QsfpInfo { msg_id } => *msg_id = mid,
             QsfpInfoReply { msg_id, .. } => *msg_id = mid,
+            QsfpSet { msg_id, .. } => *msg_id = mid,
+            QsfpSetReply { msg_id, .. } => *msg_id = mid,
             Reboot { msg_id, .. } => *msg_id = mid,
             RebootReply { msg_id, .. } => *msg_id = mid,
         }
@@ -752,6 +812,8 @@ impl CtrlMsg {
             PortMaskReply { msg_id } => *msg_id,
             QsfpInfo { msg_id } => *msg_id,
             QsfpInfoReply { msg_id, .. } => *msg_id,
+            QsfpSet { msg_id, .. } => *msg_id,
+            QsfpSetReply { msg_id, .. } => *msg_id,
             Reboot { msg_id, .. } => *msg_id,
             RebootReply { msg_id, .. } => *msg_id,
         }
