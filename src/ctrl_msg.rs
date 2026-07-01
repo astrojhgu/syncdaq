@@ -295,6 +295,7 @@ pub enum CtrlMsg {
         tx_power: [f32; 4],
         los_lol: [u8; 4], //{tx los, rx los}, 0, {tx_lol, rx_lol}, 0
         vcc_temp_alarm: [u8; 4],
+        cdr_ctrl: [u8; 4],
     },
     #[brw(magic(0x00_00_10_02_u32))]
     QsfpSet {
@@ -302,6 +303,7 @@ pub enum CtrlMsg {
         restl: u32,
         modsell: u32,
         lpmode: u32,
+        cdr_ctrl: [u8; 4],
     },
     #[brw(magic(0xff_00_10_02_u32))]
     QsfpSetReply {
@@ -309,6 +311,7 @@ pub enum CtrlMsg {
         restl: u32,
         modsell: u32,
         lpmode: u32,
+        cdr_ctrl: [u8; 4],
     },
     #[brw(magic(0x00_00_00_ff_u32))]
     Reboot { msg_id: u32 },
@@ -628,6 +631,7 @@ impl Display for CtrlMsg {
                 tx_power,
                 los_lol,
                 vcc_temp_alarm,
+                cdr_ctrl,
             } => {
                 writeln!(
                     f,
@@ -648,6 +652,7 @@ impl Display for CtrlMsg {
                     modsell:{modsell},
                     lpmode:{lpmode},
                     modpresent:{modpresent},
+                    cdr_ctrl: [{:x}, {:x}, {:x}, {:x}],
                     }}",
                     bits_to_string(los_lol[0]),
                     bits_to_string(los_lol[2]),
@@ -655,6 +660,10 @@ impl Display for CtrlMsg {
                     bits_to_string(vcc_temp_alarm[1]),
                     bits_to_string(vcc_temp_alarm[2]),
                     bits_to_string(vcc_temp_alarm[3]),
+                    cdr_ctrl[0],
+                    cdr_ctrl[1],
+                    cdr_ctrl[2],
+                    cdr_ctrl[3],
                 )
             }
             CtrlMsg::QsfpSet {
@@ -662,6 +671,7 @@ impl Display for CtrlMsg {
                 restl,
                 modsell,
                 lpmode,
+                cdr_ctrl,
             } => {
                 writeln!(
                     f,
@@ -670,7 +680,9 @@ impl Display for CtrlMsg {
                     restl: {restl},
                     modsell: {modsell},
                     lpmode: {lpmode},
-                }}"
+                    cdr_ctrl: [{:x},{:x},{:x},{:x}]
+                }}",
+                    cdr_ctrl[0], cdr_ctrl[1], cdr_ctrl[2], cdr_ctrl[3],
                 )
             }
             CtrlMsg::QsfpSetReply {
@@ -678,6 +690,7 @@ impl Display for CtrlMsg {
                 restl,
                 modsell,
                 lpmode,
+                cdr_ctrl,
             } => {
                 writeln!(
                     f,
@@ -686,7 +699,9 @@ impl Display for CtrlMsg {
                     restl: {restl},
                     modsell: {modsell},
                     lpmode: {lpmode},
-            }}"
+                    cdr_ctrl: [{:x},{:x},{:x},{:x}]
+            }}",
+                    cdr_ctrl[0], cdr_ctrl[1], cdr_ctrl[2], cdr_ctrl[3],
                 )
             }
             CtrlMsg::Reboot { msg_id } => {
@@ -882,14 +897,16 @@ where
             Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
             msg_id,
         );
-        print_bytes(&buf);
+        if debug_level > 0 {
+            print_bytes(&buf);
+        }
 
         println!("{cmd}");
 
         let mut buf = vec![0_u8; 9000];
         while let Ok((l, a)) = socket.recv_from(&mut buf) {
             //let (_s, _a)=socket.recv_from(&mut buf).unwrap();
-            if debug_level >= 1 {
+            if debug_level > 0 {
                 println!(
                     "{} received {} bytes, {} words from {:?}:",
                     Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
@@ -935,7 +952,7 @@ where
 
     if !msg_set.is_empty() {
         while let Ok((l, a)) = socket.recv_from(&mut buf) {
-            if debug_level >= 1 {
+            if debug_level > 0 {
                 println!(
                     "{} received {} bytes, {} words from {:?}:",
                     Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
@@ -1022,14 +1039,17 @@ where
         Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
         0,
     );
-    print_bytes(&buf);
+
+    if debug_level > 0 {
+        print_bytes(&buf);
+    }
 
     println!("{cmd:?}");
 
     let mut buf = vec![0_u8; 9000];
     while let Ok((l, a)) = socket.recv_from(&mut buf) {
         //let (_s, _a)=socket.recv_from(&mut buf).unwrap();
-        if debug_level >= 1 {
+        if debug_level > 0 {
             println!(
                 "{} received {} bytes, {} words from {:?}:",
                 Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
@@ -1071,7 +1091,7 @@ where
     let mut buf = vec![0_u8; 9000];
 
     while let Ok((l, a)) = socket.recv_from(&mut buf) {
-        if debug_level >= 1 {
+        if debug_level > 0 {
             println!(
                 "{} received {} bytes, {} words from {:?}:",
                 Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
