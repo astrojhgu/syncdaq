@@ -313,6 +313,15 @@ pub enum CtrlMsg {
         lpmode: u32,
         cdr_ctrl: [u8; 4],
     },
+    #[brw(magic(0x00_00_11_01_u32))]
+    GtSet {
+        msg_id: u32,
+        precursor: [u8; 4],
+        postcursor: [u8; 4],
+        txdiff: [u8; 4],
+    },
+    #[brw(magic(0xff_00_11_01_u32))]
+    GtSetReply { msg_id: u32 },
     #[brw(magic(0x00_00_00_ff_u32))]
     Reboot { msg_id: u32 },
     #[brw(magic(0xff_00_00_ff_u32))]
@@ -704,6 +713,31 @@ impl Display for CtrlMsg {
                     cdr_ctrl[0], cdr_ctrl[1], cdr_ctrl[2], cdr_ctrl[3],
                 )
             }
+            CtrlMsg::GtSet {
+                msg_id,
+                precursor,
+                postcursor,
+                txdiff,
+            } => {
+                writeln!(
+                    f,
+                    "GtSet{{
+                    msg_id: {msg_id},
+                    precursor: {precursor:?},
+                    postcursor: {postcursor:?},
+                    txdiff: {txdiff:?}
+                    }}
+                    "
+                )
+            }
+            CtrlMsg::GtSetReply { msg_id } => {
+                writeln!(
+                    f,
+                    "GtSetReply {{
+                    msg_id: {msg_id},
+                    }}"
+                )
+            }
             CtrlMsg::Reboot { msg_id } => {
                 writeln!(f, "Reboot{{msg_id:{msg_id}}}")
             }
@@ -768,6 +802,8 @@ impl CtrlMsg {
             QsfpInfoReply { msg_id, .. } => *msg_id = mid,
             QsfpSet { msg_id, .. } => *msg_id = mid,
             QsfpSetReply { msg_id, .. } => *msg_id = mid,
+            GtSet { msg_id, .. } => *msg_id = mid,
+            GtSetReply { msg_id, .. } => *msg_id = mid,
             Reboot { msg_id, .. } => *msg_id = mid,
             RebootReply { msg_id, .. } => *msg_id = mid,
         }
@@ -829,6 +865,8 @@ impl CtrlMsg {
             QsfpInfoReply { msg_id, .. } => *msg_id,
             QsfpSet { msg_id, .. } => *msg_id,
             QsfpSetReply { msg_id, .. } => *msg_id,
+            GtSet { msg_id, .. } => *msg_id,
+            GtSetReply { msg_id } => *msg_id,
             Reboot { msg_id, .. } => *msg_id,
             RebootReply { msg_id, .. } => *msg_id,
         }

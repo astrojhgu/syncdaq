@@ -1,0 +1,5 @@
+- !GtSet
+  msg_id: 0
+  precursor: [8, 8, 8, 8]
+  postcursor: [8, 8, 8, 8]
+  txdiff: [0, 0, 0, 0]
