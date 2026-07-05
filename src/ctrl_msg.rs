@@ -322,6 +322,22 @@ pub enum CtrlMsg {
     },
     #[brw(magic(0xff_00_11_01_u32))]
     GtSetReply { msg_id: u32 },
+    #[brw(magic(0x00_00_20_01_u32))]
+    FetchFW {
+        msg_id: u32,
+        srv_ip: [u8; 4],
+        srv_port: u32,
+    },
+    #[brw(magic(0xff_00_20_01_u32))]
+    FetchFWReply {
+        msg_id: u32,
+        nbytes_fetched: u32,
+        md5checked: u32,
+    },
+    #[brw(magic(0x00_00_20_02_u32))]
+    SwitchFW { msg_id: u32, md5sum: [u8; 16] },
+    #[brw(magic(0xff_00_20_02_u32))]
+    SwitchFWReply { msg_id: u32, succeeded: u32 },
     #[brw(magic(0x00_00_00_ff_u32))]
     Reboot { msg_id: u32 },
     #[brw(magic(0xff_00_00_ff_u32))]
@@ -334,6 +350,12 @@ fn bits_to_string(x: u8) -> String {
         s.push_str(&(((x >> i) & 1).to_string()));
     }
     s
+}
+
+fn ascii_from_fixed(buf: &[u8]) -> &str {
+    let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+
+    std::str::from_utf8(&buf[..len]).unwrap()
 }
 
 impl Display for CtrlMsg {
@@ -738,6 +760,60 @@ impl Display for CtrlMsg {
                     }}"
                 )
             }
+            CtrlMsg::FetchFW {
+                msg_id,
+                srv_ip,
+                srv_port,
+            } => {
+                writeln!(
+                    f,
+                    "
+                    FetchFW{{
+                    msg_id: {msg_id},
+                    srv_ip: {srv_ip:?},
+                    srv_port: {srv_port},
+                    }}
+                    "
+                )
+            }
+            CtrlMsg::FetchFWReply {
+                msg_id,
+                nbytes_fetched,
+                md5checked,
+            } => {
+                writeln!(
+                    f,
+                    "
+                    FetchFWReply {{
+                    msg_id: {msg_id},
+                    nbytes_fetched: {nbytes_fetched}
+                    md5checked: {md5checked},
+                    }}
+                    "
+                )
+            }
+            CtrlMsg::SwitchFW { msg_id, md5sum } => {
+                writeln!(
+                    f,
+                    "
+                    SwitchFW{{
+                    msg_id: {msg_id},
+                    md5sum: {md5sum:x?},
+                    }}
+                    "
+                )
+            }
+            CtrlMsg::SwitchFWReply { msg_id, succeeded } => {
+                writeln!(
+                    f,
+                    "
+                    SwitchFWReply{{
+                    msg_id: {msg_id},
+                    succeeded: {succeeded}
+                    }}
+                    "
+                )
+            }
             CtrlMsg::Reboot { msg_id } => {
                 writeln!(f, "Reboot{{msg_id:{msg_id}}}")
             }
@@ -804,6 +880,10 @@ impl CtrlMsg {
             QsfpSetReply { msg_id, .. } => *msg_id = mid,
             GtSet { msg_id, .. } => *msg_id = mid,
             GtSetReply { msg_id, .. } => *msg_id = mid,
+            FetchFW { msg_id, .. } => *msg_id = mid,
+            FetchFWReply { msg_id, .. } => *msg_id = mid,
+            SwitchFW { msg_id, .. } => *msg_id = mid,
+            SwitchFWReply { msg_id, .. } => *msg_id = mid,
             Reboot { msg_id, .. } => *msg_id = mid,
             RebootReply { msg_id, .. } => *msg_id = mid,
         }
@@ -867,6 +947,10 @@ impl CtrlMsg {
             QsfpSetReply { msg_id, .. } => *msg_id,
             GtSet { msg_id, .. } => *msg_id,
             GtSetReply { msg_id } => *msg_id,
+            FetchFW { msg_id, .. } => *msg_id,
+            FetchFWReply { msg_id, .. } => *msg_id,
+            SwitchFW { msg_id, .. } => *msg_id,
+            SwitchFWReply { msg_id, .. } => *msg_id,
             Reboot { msg_id, .. } => *msg_id,
             RebootReply { msg_id, .. } => *msg_id,
         }
