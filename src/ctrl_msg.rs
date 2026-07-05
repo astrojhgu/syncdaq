@@ -327,6 +327,7 @@ pub enum CtrlMsg {
         msg_id: u32,
         srv_ip: [u8; 4],
         srv_port: u32,
+        storage: u32,
     },
     #[brw(magic(0xff_00_20_01_u32))]
     FetchFWReply {
@@ -335,7 +336,11 @@ pub enum CtrlMsg {
         md5checked: u32,
     },
     #[brw(magic(0x00_00_20_02_u32))]
-    SwitchFW { msg_id: u32, md5sum: [u8; 16] },
+    SwitchFW {
+        msg_id: u32,
+        md5sum: [u8; 16],
+        storage: u32,
+    },
     #[brw(magic(0xff_00_20_02_u32))]
     SwitchFWReply { msg_id: u32, succeeded: u32 },
     #[brw(magic(0x00_00_00_ff_u32))]
@@ -764,6 +769,7 @@ impl Display for CtrlMsg {
                 msg_id,
                 srv_ip,
                 srv_port,
+                storage,
             } => {
                 writeln!(
                     f,
@@ -772,6 +778,7 @@ impl Display for CtrlMsg {
                     msg_id: {msg_id},
                     srv_ip: {srv_ip:?},
                     srv_port: {srv_port},
+                    storage: {storage}
                     }}
                     "
                 )
@@ -792,13 +799,18 @@ impl Display for CtrlMsg {
                     "
                 )
             }
-            CtrlMsg::SwitchFW { msg_id, md5sum } => {
+            CtrlMsg::SwitchFW {
+                msg_id,
+                md5sum,
+                storage,
+            } => {
                 writeln!(
                     f,
                     "
                     SwitchFW{{
                     msg_id: {msg_id},
                     md5sum: {md5sum:x?},
+                    storage: {storage}
                     }}
                     "
                 )
