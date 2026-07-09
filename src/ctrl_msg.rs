@@ -296,6 +296,8 @@ pub enum CtrlMsg {
         los_lol: [u8; 4], //{tx los, rx los}, 0, {tx_lol, rx_lol}, 0
         vcc_temp_alarm: [u8; 4],
         cdr_ctrl: [u8; 4],
+        eq_ctrl: [i8; 4],
+        adapt_eq: [u8; 4],
     },
     #[brw(magic(0x00_00_10_02_u32))]
     QsfpSet {
@@ -304,6 +306,8 @@ pub enum CtrlMsg {
         modsell: u32,
         lpmode: u32,
         cdr_ctrl: [u8; 4],
+        eq_ctrl: [i8; 4],
+        adapt_eq: [u8; 4],
     },
     #[brw(magic(0xff_00_10_02_u32))]
     QsfpSetReply {
@@ -312,6 +316,8 @@ pub enum CtrlMsg {
         modsell: u32,
         lpmode: u32,
         cdr_ctrl: [u8; 4],
+        eq_ctrl: [i8; 4],
+        adapt_eq: [u8; 4],
     },
     #[brw(magic(0x00_00_11_01_u32))]
     GtSet {
@@ -668,6 +674,8 @@ impl Display for CtrlMsg {
                 los_lol,
                 vcc_temp_alarm,
                 cdr_ctrl,
+                eq_ctrl,
+                adapt_eq,
             } => {
                 writeln!(
                     f,
@@ -689,6 +697,8 @@ impl Display for CtrlMsg {
                     lpmode:{lpmode},
                     modpresent:{modpresent},
                     cdr_ctrl: [{:x}, {:x}, {:x}, {:x}],
+                    eq_ctrl: [{:x}, {:x}, {:x}, {:x}],
+                    adapt_ctrl: [{:x}, {:x}, {:x}, {:x}],
                     }}",
                     bits_to_string(los_lol[0]),
                     bits_to_string(los_lol[2]),
@@ -700,6 +710,14 @@ impl Display for CtrlMsg {
                     cdr_ctrl[1],
                     cdr_ctrl[2],
                     cdr_ctrl[3],
+                    eq_ctrl[0],
+                    eq_ctrl[1],
+                    eq_ctrl[2],
+                    eq_ctrl[3],
+                    adapt_eq[0],
+                    adapt_eq[1],
+                    adapt_eq[2],
+                    adapt_eq[3],
                 )
             }
             CtrlMsg::QsfpSet {
@@ -708,6 +726,8 @@ impl Display for CtrlMsg {
                 modsell,
                 lpmode,
                 cdr_ctrl,
+                eq_ctrl,
+                adapt_eq,
             } => {
                 writeln!(
                     f,
@@ -716,9 +736,22 @@ impl Display for CtrlMsg {
                     restl: {restl},
                     modsell: {modsell},
                     lpmode: {lpmode},
-                    cdr_ctrl: [{:x},{:x},{:x},{:x}]
+                    cdr_ctrl: [{:x},{:x},{:x},{:x}],
+                    eq_ctrl: [{:x},{:x},{:x},{:x}],
+                    adapt_eq: [{:x},{:x},{:x},{:x}],
                 }}",
-                    cdr_ctrl[0], cdr_ctrl[1], cdr_ctrl[2], cdr_ctrl[3],
+                    cdr_ctrl[0],
+                    cdr_ctrl[1],
+                    cdr_ctrl[2],
+                    cdr_ctrl[3],
+                    eq_ctrl[0],
+                    eq_ctrl[1],
+                    eq_ctrl[2],
+                    eq_ctrl[3],
+                    adapt_eq[0],
+                    adapt_eq[1],
+                    adapt_eq[2],
+                    adapt_eq[3],
                 )
             }
             CtrlMsg::QsfpSetReply {
@@ -727,6 +760,8 @@ impl Display for CtrlMsg {
                 modsell,
                 lpmode,
                 cdr_ctrl,
+                eq_ctrl,
+                adapt_eq,
             } => {
                 writeln!(
                     f,
@@ -735,9 +770,22 @@ impl Display for CtrlMsg {
                     restl: {restl},
                     modsell: {modsell},
                     lpmode: {lpmode},
-                    cdr_ctrl: [{:x},{:x},{:x},{:x}]
+                    cdr_ctrl: [{:x},{:x},{:x},{:x}],
+                    eq_ctrl: [{:x},{:x},{:x},{:x}],
+                    adapt_ctrl: [{:x},{:x},{:x},{:x}]
             }}",
-                    cdr_ctrl[0], cdr_ctrl[1], cdr_ctrl[2], cdr_ctrl[3],
+                    cdr_ctrl[0],
+                    cdr_ctrl[1],
+                    cdr_ctrl[2],
+                    cdr_ctrl[3],
+                    eq_ctrl[0],
+                    eq_ctrl[1],
+                    eq_ctrl[2],
+                    eq_ctrl[3],
+                    adapt_eq[0],
+                    adapt_eq[1],
+                    adapt_eq[2],
+                    adapt_eq[3],
                 )
             }
             CtrlMsg::GtSet {
