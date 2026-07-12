@@ -4,4 +4,5 @@
   modsell: 0
   lpmode: 0
   cdr_ctrl: [0xff, 0, 0, 0]
-  eq_ctrl: [1, 1, 1, 1]
+  eq_ctrl: [5, 5, 5, 5]
+  adapt_eq: [1, 1, 1, 1]

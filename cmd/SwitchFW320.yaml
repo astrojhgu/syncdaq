@@ -1,0 +1,22 @@
+- !SwitchFW
+  msg_id: 0
+  md5sum:
+      [
+          0x24,
+          0x59,
+          0xf3,
+          0x63,
+          0x64,
+          0x04,
+          0xa1,
+          0x84,
+          0xa4,
+          0x24,
+          0x39,
+          0x7e,
+          0x16,
+          0xe6,
+          0x55,
+          0xe5,
+      ]
+  storage: 0

@@ -1,0 +1,5 @@
+- !FetchFW
+  msg_id: 0
+  srv_ip: [192, 168, 5, 1]
+  srv_port: 69
+  storage: 1
