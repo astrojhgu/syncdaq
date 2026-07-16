@@ -1,0 +1,32 @@
+- !SetDSA
+  msg_id: 0
+  port_id: 0
+  dsa_value: 12
+- !SetDSA
+  msg_id: 0
+  port_id: 1
+  dsa_value: 12
+- !SetDSA
+  msg_id: 0
+  port_id: 2
+  dsa_value: 12
+- !SetDSA
+  msg_id: 0
+  port_id: 3
+  dsa_value: 12
+- !SetDSA
+  msg_id: 0
+  port_id: 4
+  dsa_value: 12
+- !SetDSA
+  msg_id: 0
+  port_id: 5
+  dsa_value: 12
+- !SetDSA
+  msg_id: 0
+  port_id: 6
+  dsa_value: 12
+- !SetDSA
+  msg_id: 0
+  port_id: 7
+  dsa_value: 12

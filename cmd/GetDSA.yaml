@@ -1,0 +1,24 @@
+- !GetDSA
+  msg_id: 0
+  port_id: 0
+- !GetDSA
+  msg_id: 0
+  port_id: 1
+- !GetDSA
+  msg_id: 0
+  port_id: 2
+- !GetDSA
+  msg_id: 0
+  port_id: 3
+- !GetDSA
+  msg_id: 0
+  port_id: 4
+- !GetDSA
+  msg_id: 0
+  port_id: 5
+- !GetDSA
+  msg_id: 0
+  port_id: 6
+- !GetDSA
+  msg_id: 0
+  port_id: 7
