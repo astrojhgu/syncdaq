@@ -276,9 +276,17 @@ pub enum CtrlMsg {
     #[brw(magic(0xff_00_00_0d_u32))]
     MixerSetReply { msg_id: u32 },
     #[brw(magic(0x00_00_00_0e_u32))]
-    PortMask { msg_id: u32, mask: u32 },
+    GetDSA { msg_id: u32, port_id: u32 },
     #[brw(magic(0xff_00_00_0e_u32))]
-    PortMaskReply { msg_id: u32 },
+    GetDSAReply { msg_id: u32, dsa_value: f32 },
+    #[brw(magic(0x00_00_00_0f_u32))]
+    SetDSA {
+        msg_id: u32,
+        port_id: u32,
+        dsa_value: f32,
+    },
+    #[brw(magic(0xff_00_00_0f_u32))]
+    SetDSAReply { msg_id: u32 },
     #[brw(magic(0x00_00_10_01_u32))]
     QsfpInfo { msg_id: u32 },
     #[brw(magic(0xff_00_10_01_u32))]
@@ -651,11 +659,24 @@ impl Display for CtrlMsg {
             CtrlMsg::MixerSetReply { msg_id } => {
                 writeln!(f, "MixerSetReply {{msg_id: {msg_id}}}")
             }
-            CtrlMsg::PortMask { msg_id, mask } => {
-                writeln!(f, "PortMask {{msg_id:{msg_id}, mask:{mask:x}}}")
+            CtrlMsg::GetDSA { msg_id, port_id } => {
+                writeln!(f, "GetDSA {{msg_id:{msg_id}, port_id: {port_id} }}")
             }
-            CtrlMsg::PortMaskReply { msg_id } => {
-                writeln!(f, "PortMaskReply{{msg_id:{msg_id}}}")
+            CtrlMsg::GetDSAReply { msg_id, dsa_value } => {
+                writeln!(f, "GetDSAReply{{msg_id:{msg_id}, dsa_value: {dsa_value}}}")
+            }
+            CtrlMsg::SetDSA {
+                msg_id,
+                port_id,
+                dsa_value,
+            } => {
+                writeln!(
+                    f,
+                    "SetDSA{{msg_id:{msg_id}, port_id:{port_id} dsa_value: {dsa_value}}}"
+                )
+            }
+            CtrlMsg::SetDSAReply { msg_id } => {
+                writeln!(f, "SetDSAReply{{msg_id:{msg_id}}}")
             }
             CtrlMsg::QsfpInfo { msg_id } => {
                 writeln!(f, "QsfpInfo{{msg_id:{msg_id}}}")
@@ -688,9 +709,7 @@ impl Display for CtrlMsg {
                     tx_power: {tx_power:?},
                     los: {},
                     lol: {},
-                    temp_alarm:{},
                     l_temp_alarm:{},
-                    vcc_alarm:{},
                     l_vcc_alarm:{},
                     restl:{restl},
                     modsell:{modsell},
@@ -702,9 +721,7 @@ impl Display for CtrlMsg {
                     }}",
                     bits_to_string(los_lol[0]),
                     bits_to_string(los_lol[2]),
-                    bits_to_string(vcc_temp_alarm[0]),
                     bits_to_string(vcc_temp_alarm[1]),
-                    bits_to_string(vcc_temp_alarm[2]),
                     bits_to_string(vcc_temp_alarm[3]),
                     cdr_ctrl[0],
                     cdr_ctrl[1],
@@ -932,8 +949,10 @@ impl CtrlMsg {
             SetClkReply { msg_id, .. } => *msg_id = mid,
             MixerSet { msg_id, .. } => *msg_id = mid,
             MixerSetReply { msg_id } => *msg_id = mid,
-            PortMask { msg_id, .. } => *msg_id = mid,
-            PortMaskReply { msg_id } => *msg_id = mid,
+            GetDSA { msg_id, .. } => *msg_id = mid,
+            GetDSAReply { msg_id, .. } => *msg_id = mid,
+            SetDSA { msg_id, .. } => *msg_id = mid,
+            SetDSAReply { msg_id } => *msg_id = mid,
             QsfpInfo { msg_id } => *msg_id = mid,
             QsfpInfoReply { msg_id, .. } => *msg_id = mid,
             QsfpSet { msg_id, .. } => *msg_id = mid,
@@ -999,8 +1018,10 @@ impl CtrlMsg {
             SetClkReply { msg_id, .. } => *msg_id,
             MixerSet { msg_id, .. } => *msg_id,
             MixerSetReply { msg_id } => *msg_id,
-            PortMask { msg_id, .. } => *msg_id,
-            PortMaskReply { msg_id } => *msg_id,
+            GetDSA { msg_id, .. } => *msg_id,
+            GetDSAReply { msg_id, .. } => *msg_id,
+            SetDSA { msg_id, .. } => *msg_id,
+            SetDSAReply { msg_id } => *msg_id,
             QsfpInfo { msg_id } => *msg_id,
             QsfpInfoReply { msg_id, .. } => *msg_id,
             QsfpSet { msg_id, .. } => *msg_id,
