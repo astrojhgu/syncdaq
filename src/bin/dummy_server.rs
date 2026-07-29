@@ -40,6 +40,8 @@ fn main() {
                     rfdc_restart_cnt: 0,
                     temperature: 40.0,
                     nports: 8,
+                    over_voltage_state: 0,
+                    smp_rate: 320,
                     fifo_full_cnt: 0,
                     pkt_cnt1: vec![0; 8],
                     axi_frame_cnt1: vec![0; 8],
@@ -86,7 +88,7 @@ fn main() {
             //StreamStartReply { msg_id } => *msg_id = mid,
             StreamStop { msg_id } => StreamStopReply { msg_id },
             //StreamStopReply { msg_id } => *msg_id = mid,
-            Init { msg_id, .. } => InitReply { msg_id },
+            ClrOv { msg_id } => ClrOvReply { msg_id },
 
             PwrCtrl { msg_id, .. } => PwrCtrlReply { msg_id },
 

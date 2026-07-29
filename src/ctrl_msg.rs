@@ -66,6 +66,8 @@ pub enum Health {
         temperature: f32,
         nports: u32,
         fifo_full_cnt: u32,
+        over_voltage_state: u32,
+        smp_rate: u32,
         #[br(count=nports)]
         pkt_cnt1: Vec<u64>,
         #[br(count=nports)]
@@ -85,6 +87,8 @@ impl Display for Health {
                 temperature,
                 nports,
                 fifo_full_cnt,
+                over_voltage_state,
+                smp_rate,
                 ref pkt_cnt1,
                 ref axi_frame_cnt1,
                 ref pkt_cnt2,
@@ -94,8 +98,10 @@ impl Display for Health {
                 writeln!(f, "rfdc_restart_cnt: {}, ", rfdc_restart_cnt)?;
                 writeln!(f, "temperature: {} degC, ", temperature)?;
                 writeln!(f, "nports: {}, ", nports)?;
+                writeln!(f, "smp_rate: {} MHz, ", smp_rate)?;
                 writeln!(f, "fifo_full_cnt: {}, ", fifo_full_cnt >> 16)?;
                 writeln!(f, "fifo_len: {}, ", fifo_full_cnt & 0xffff)?;
+                writeln!(f, "over voltage state: {:x}", over_voltage_state)?;
                 write!(f, "pkt_cnt1: \t\t[")?;
                 for x in pkt_cnt1 {
                     write!(f, "{}, ", x)?;
@@ -231,9 +237,9 @@ pub enum CtrlMsg {
     PwrCtrlReply { msg_id: u32 },
 
     #[brw(magic(0x08_u32))]
-    Init { msg_id: u32, reserved_zeros: u32 },
+    ClrOv { msg_id: u32 },
     #[brw(magic(0xff_00_00_08_u32))]
-    InitReply { msg_id: u32 },
+    ClrOvReply { msg_id: u32 },
 
     #[brw(magic(0x0a_u32))]
     XGbeCfgSingle {
@@ -581,14 +587,11 @@ impl Display for CtrlMsg {
                 writeln!(f, "PwrCtrlReply{{msg_id: {msg_id}}}")
             }
 
-            CtrlMsg::Init {
-                msg_id,
-                reserved_zeros: _,
-            } => {
-                writeln!(f, "Init {{msg_id: {msg_id}}}")
+            CtrlMsg::ClrOv { msg_id } => {
+                writeln!(f, "ClrOv {{msg_id: {msg_id}}}")
             }
 
-            CtrlMsg::InitReply { msg_id } => {
+            CtrlMsg::ClrOvReply { msg_id } => {
                 writeln!(f, "InitReply {{msg_id: {msg_id}}}")
             }
 
@@ -931,8 +934,8 @@ impl CtrlMsg {
             BitShiftReply { msg_id, .. } => *msg_id = mid,
             PwrCtrl { msg_id, .. } => *msg_id = mid,
             PwrCtrlReply { msg_id, .. } => *msg_id = mid,
-            Init { msg_id, .. } => *msg_id = mid,
-            InitReply { msg_id, .. } => *msg_id = mid,
+            ClrOv { msg_id, .. } => *msg_id = mid,
+            ClrOvReply { msg_id, .. } => *msg_id = mid,
             XGbeCfgQuery { msg_id } => *msg_id = mid,
             XGbeCfgQueryReply {
                 msg_id,
@@ -996,12 +999,8 @@ impl CtrlMsg {
             BitShiftReply { msg_id, .. } => *msg_id,
             PwrCtrl { msg_id, .. } => *msg_id,
             PwrCtrlReply { msg_id } => *msg_id,
-            Init {
-                msg_id,
-                reserved_zeros: _,
-            } => *msg_id,
-            InitReply { msg_id } => *msg_id,
-
+            ClrOv { msg_id } => *msg_id,
+            ClrOvReply { msg_id } => *msg_id,
             XGbeCfgQuery { msg_id } => *msg_id,
             XGbeCfgQueryReply {
                 msg_id,
