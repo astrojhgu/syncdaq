@@ -98,7 +98,7 @@ impl Display for Health {
                 writeln!(f, "rfdc_restart_cnt: {}, ", rfdc_restart_cnt)?;
                 writeln!(f, "temperature: {} degC, ", temperature)?;
                 writeln!(f, "nports: {}, ", nports)?;
-                writeln!(f, "smp_rate: {} MHz, ", smp_rate)?;
+                writeln!(f, "smp_rate: {} MSps, ", smp_rate)?;
                 writeln!(f, "fifo_full_cnt: {}, ", fifo_full_cnt >> 16)?;
                 writeln!(f, "fifo_len: {}, ", fifo_full_cnt & 0xffff)?;
                 writeln!(f, "over voltage state: {:x}", over_voltage_state)?;
