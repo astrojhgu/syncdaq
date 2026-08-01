@@ -67,7 +67,9 @@ pub enum Health {
         nports: u32,
         fifo_full_cnt: u32,
         over_voltage_state: u32,
+        over_range_state: u32,
         smp_rate: u32,
+        _z: u32,
         #[br(count=nports)]
         pkt_cnt1: Vec<u64>,
         #[br(count=nports)]
@@ -88,7 +90,9 @@ impl Display for Health {
                 nports,
                 fifo_full_cnt,
                 over_voltage_state,
+                over_range_state,
                 smp_rate,
+                _z,
                 ref pkt_cnt1,
                 ref axi_frame_cnt1,
                 ref pkt_cnt2,
@@ -102,6 +106,7 @@ impl Display for Health {
                 writeln!(f, "fifo_full_cnt: {}, ", fifo_full_cnt >> 16)?;
                 writeln!(f, "fifo_len: {}, ", fifo_full_cnt & 0xffff)?;
                 writeln!(f, "over voltage state: {:x}", over_voltage_state)?;
+                writeln!(f, "over range state: {:x}", over_range_state)?;
                 write!(f, "pkt_cnt1: \t\t[")?;
                 for x in pkt_cnt1 {
                     write!(f, "{}, ", x)?;
@@ -377,11 +382,11 @@ fn bits_to_string(x: u8) -> String {
     s
 }
 
-fn ascii_from_fixed(buf: &[u8]) -> &str {
-    let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+// fn ascii_from_fixed(buf: &[u8]) -> &str {
+//     let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
 
-    std::str::from_utf8(&buf[..len]).unwrap()
-}
+//     std::str::from_utf8(&buf[..len]).unwrap()
+// }
 
 impl Display for CtrlMsg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

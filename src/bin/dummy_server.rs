@@ -41,6 +41,8 @@ fn main() {
                     temperature: 40.0,
                     nports: 8,
                     over_voltage_state: 0,
+                    over_range_state: 0,
+                    _z: 0,
                     smp_rate: 320,
                     fifo_full_cnt: 0,
                     pkt_cnt1: vec![0; 8],
