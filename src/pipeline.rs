@@ -126,8 +126,8 @@ pub fn recv_pkt<T>(
     let print_interval = Duration::from_secs(2);
 
     let mut next_cnt = None;
-    let mut ndropped = 0;
-    let mut nreceived = 0;
+    let mut ndropped: usize = 0;
+    let mut nreceived: usize = 0;
     let pool: Arc<LinearObjectPool<Payload<T>>> = Arc::new(LinearObjectPool::new(
         move || {
             //eprint!("o");

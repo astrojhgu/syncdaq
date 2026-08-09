@@ -79,7 +79,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } = msg.clone()
             {
                 println!("{}", tick_cnt2 - tick_cnt1);
-                if tick_cnt2 - tick_cnt1 != 10_000_000 || locked & 0x00_00_00_0f != 0x0f {
+                if tick_cnt2 - tick_cnt1 != 10_000_000 {
+                    println!("tick cnt diff between two pps's !=10_000_000");
+                }
+                if tick_cnt2 > 20_000_000 || tick_cnt1 > 10_000_000 {
+                    println!("last pps arrived more 1 sec ago");
+                }
+                if tick_cnt2 - tick_cnt1 != 10_000_000
+                    || tick_cnt2 > 20_000_000
+                    || tick_cnt1 > 10_000_000
+                    || locked & 0x00_00_00_0f != 0x0f
+                {
                     return Err(Box::new(MsgError::StatAbnormal));
                 }
             }
