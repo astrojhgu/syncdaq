@@ -45,7 +45,7 @@ fn bench_resample2(npkts: usize) -> (f64, f64, f64, f64) {
         let start = Instant::now();
         for _ in 0..npkts {
             resample2(&input, &mut output, &coeffs, &mut state, bit_shift);
-            sink += output[0] as i32;
+            sink = sink.wrapping_add(output[0] as i32);
         }
         t_streams = start.elapsed().as_secs_f64();
 
@@ -53,7 +53,7 @@ fn bench_resample2(npkts: usize) -> (f64, f64, f64, f64) {
         let start = Instant::now();
         for _ in 0..npkts {
             resample2_prepared(&input, &mut output, &coeffs_i32, &mut state, bit_shift);
-            sink += output[0] as i32;
+            sink = sink.wrapping_add(output[0] as i32);
         }
         t_prepared = start.elapsed().as_secs_f64();
 
@@ -61,7 +61,7 @@ fn bench_resample2(npkts: usize) -> (f64, f64, f64, f64) {
         let start = Instant::now();
         for _ in 0..npkts {
             resample2_plain(&input, &mut output, &coeffs, &mut state, bit_shift);
-            sink += output[0] as i32;
+            sink = sink.wrapping_add(output[0] as i32);
         }
         t_plain = start.elapsed().as_secs_f64();
     }
