@@ -10,7 +10,7 @@ use crate::{firdecim2::firdec_worker::fir_symmetric_full_rate, utils::pin_curren
 use super::{
     super::payload::{N_BYTE_PER_FRAME, Payload},
     I32s,
-    firdec_worker::resample2,
+    firdec_worker::{StreamState, resample2_streams},
 };
 
 
@@ -24,18 +24,12 @@ pub fn start_decim_pipeline(
 ) -> JoinHandle<()> {
     // Implementation of the decimation pipeline start logic
     let fir_coeffs = fir_coeffs.to_vec();
-    let _fir_coeffs_i32: Vec<std::simd::Simd<i32, 16>> =
-        fir_coeffs.iter().map(|&c| I32s::splat(c as i32)).collect();
+    let fir_coeffs_i32: Vec<I32s> = fir_coeffs.iter().map(|&c| I32s::splat(c as i32)).collect();
     let patch_len = N_BYTE_PER_FRAME / std::mem::size_of::<Complex<DTYPE>>();
 
     std::thread::spawn(move || {
         pin_current_thread();
-        let ntaps = fir_coeffs.len();
-        let state_len = ntaps * 2 - 2 + patch_len; // 2:1 decimation, so input is 2x output
-        let mut state = vec![Complex::<DTYPE>::zero(); state_len];
-        let state_raw = unsafe {
-            std::slice::from_raw_parts_mut(state.as_mut_ptr() as *mut DTYPE, state_len * 2)
-        };
+        let mut state = StreamState::new();
 
         let pool: Arc<LinearObjectPool<Payload<Complex<DTYPE>>>> = Arc::new(LinearObjectPool::new(
             move || {
@@ -60,11 +54,11 @@ pub fn start_decim_pipeline(
 
                 output.copy_header(&input);
                 output.pkt_cnt /= 2; // because of 2:1 decimation
-                resample2(
+                resample2_streams(
                     input_raw,
                     &mut output_raw[..patch_len],
-                    &fir_coeffs,
-                    state_raw,
+                    &fir_coeffs_i32,
+                    &mut state,
                     bit_shift,
                 );
             } else {
@@ -76,11 +70,11 @@ pub fn start_decim_pipeline(
                     std::slice::from_raw_parts(input.data.as_ptr() as *const DTYPE, patch_len * 2)
                 };
 
-                resample2(
+                resample2_streams(
                     input_raw,
                     &mut output_raw[patch_len..],
-                    &fir_coeffs,
-                    state_raw,
+                    &fir_coeffs_i32,
+                    &mut state,
                     bit_shift,
                 );
             } else {

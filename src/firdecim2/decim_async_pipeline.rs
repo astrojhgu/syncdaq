@@ -6,7 +6,6 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use std::{
-    ops::DerefMut,
     pin::Pin,
     sync::{Arc, Mutex},
 };
@@ -18,7 +17,7 @@ use crate::firdecim2::firdec_worker::fir_symmetric_full_rate;
 use super::{
     super::payload::{N_BYTE_PER_FRAME, Payload},
     I32s,
-    firdec_worker::resample2,
+    firdec_worker::{StreamState, resample2_streams},
 };
 
 pub fn with_buffer<S>(upstream: S) -> impl Stream<Item = S::Item>
@@ -50,8 +49,7 @@ pub fn decim2(
     bit_shift: u32,
 ) -> impl Stream<Item = LinearOwnedReusable<Payload<Complex<i16>>>> + Send + 'static {
     let fir_coeffs = fir_coeffs.to_vec();
-    let _fir_coeffs_i32: Vec<std::simd::Simd<i32, 16>> =
-        fir_coeffs.iter().map(|&c| I32s::splat(c as i32)).collect();
+    let fir_coeffs_i32: Vec<I32s> = fir_coeffs.iter().map(|&c| I32s::splat(c as i32)).collect();
     let patch_len = N_BYTE_PER_FRAME / std::mem::size_of::<Complex<i16>>();
 
     //let (tx, rx) = mpsc::channel(buffer_size);
@@ -67,12 +65,7 @@ pub fn decim2(
         },
     ));
 
-    let ntaps = fir_coeffs.len();
-    let state_len = ntaps * 2 - 2 + patch_len; // 2:1 decimation, so input is 2x output
-    let state = Arc::new(Mutex::new(vec![i16::zero(); state_len * 2]));
-    // let state_raw = unsafe {
-    //     std::slice::from_raw_parts_mut(state.as_mut_ptr() as *mut i16, state_len * 2)
-    // };
+    let state = Arc::new(Mutex::new(StreamState::new()));
 
     stream! {
         futures_util::pin_mut!(input);
@@ -109,13 +102,11 @@ pub fn decim2(
                     std::slice::from_raw_parts(input1.data.as_ptr() as *const i16, patch_len * 2)
                 };
 
-                let fir1=fir_coeffs.clone();
-
-                resample2(
+                resample2_streams(
                     input_raw,
                     &mut output_raw1,
-                    &fir1,
-                    state.lock().unwrap().deref_mut(),
+                    &fir_coeffs_i32,
+                    &mut *state.lock().unwrap(),
                     bit_shift,
                 );
 
@@ -123,11 +114,11 @@ pub fn decim2(
                         std::slice::from_raw_parts(input2.data.as_ptr() as *const i16, patch_len * 2)
                     };
 
-                resample2(
+                resample2_streams(
                     input_raw,
                     &mut output_raw2,
-                    &fir1,
-                    state.lock().unwrap().deref_mut(),
+                    &fir_coeffs_i32,
+                    &mut *state.lock().unwrap(),
                     bit_shift,
                 );
             }
