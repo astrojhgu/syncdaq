@@ -166,3 +166,99 @@ pub fn pin_current_thread() {
 
     core_affinity::set_for_current(core);
 }
+
+pub fn pin_to_core(core_id: usize) {
+    if let Some(core) = core_affinity::get_core_ids()
+        .into_iter()
+        .flatten()
+        .find(|c| c.id == core_id)
+    {
+        core_affinity::set_for_current(core);
+    }
+}
+
+/// 探测 CPU 的基础频率（Linux cpufreq），用于区分 P/E 核。
+fn cpu_base_freq(cpu: usize) -> Option<u32> {
+    std::fs::read_to_string(format!(
+        "/sys/devices/system/cpu/cpu{cpu}/cpufreq/base_frequency"
+    ))
+    .ok()?
+    .trim()
+    .parse()
+    .ok()
+}
+
+/// 返回某逻辑 CPU 所属物理核的代表 id（thread_siblings_list 中的最小值）。
+fn physical_core_repr(cpu: usize) -> usize {
+    if let Ok(s) = std::fs::read_to_string(format!(
+        "/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list"
+    )) {
+        if let Some(first) = s.split(['-', ',']).next() {
+            if let Ok(id) = first.trim().parse::<usize>() {
+                return id;
+            }
+        }
+    }
+    cpu
+}
+
+/// 优选 worker 核列表：每个物理核一个代表 CPU，P 核（频率高）在前。
+pub fn preferred_worker_cores() -> Vec<usize> {
+    let n = core_affinity::get_core_ids()
+        .map(|v| v.len())
+        .unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1));
+    let mut phys: std::collections::BTreeMap<usize, (usize, u32)> =
+        std::collections::BTreeMap::new();
+    for cpu in 0..n {
+        let phys_id = physical_core_repr(cpu);
+        let freq = cpu_base_freq(cpu).unwrap_or(0);
+        let e = phys.entry(phys_id).or_insert((cpu, 0));
+        if freq > e.1 {
+            *e = (cpu, freq);
+        }
+    }
+    let mut cores: Vec<(usize, u32)> = phys.into_values().collect();
+    // P 核（高 base_freq）优先，同频按 id 升序
+    cores.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    cores.into_iter().map(|(c, _)| c).collect()
+}
+
+use std::sync::Mutex;
+
+/// 本进程 worker 线程已认领的核（stage 线程启动时认领一次，进程存活期间不释放）。
+static CLAIMED_CORES: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+
+/// 为 worker 线程认领一个未被占用的核。
+///
+/// 规则：
+/// - 设置了 `SYNCDAQ_NO_PIN` 时返回 `None`（不绑定）。
+/// - 设置了 `SYNCDAQ_CORES`（如 `"0,2,4,6"`）时按该列表轮转，优先未占用的核。
+/// - 否则自动认领：每个物理 P 核一个代表、P 核优先，避免落到 E 核 / HT 兄弟核争抢。
+pub fn claim_worker_core() -> Option<usize> {
+    if std::env::var("SYNCDAQ_NO_PIN").is_ok() {
+        return None;
+    }
+    let mut claimed = CLAIMED_CORES.lock().unwrap();
+    if let Some(list) = std::env::var("SYNCDAQ_CORES")
+        .ok()
+        .map(|s| s.split([',', ' ']).filter_map(|x| x.trim().parse::<usize>().ok()).collect::<Vec<_>>())
+        .filter(|v: &Vec<usize>| !v.is_empty())
+    {
+        for &c in &list {
+            if !claimed.contains(&c) {
+                claimed.push(c);
+                return Some(c);
+            }
+        }
+        // 全部占用：轮转分配
+        let n = claimed.iter().filter(|c| list.contains(c)).count();
+        return Some(list[n % list.len()]);
+    }
+    for c in preferred_worker_cores() {
+        if !claimed.contains(&c) {
+            claimed.push(c);
+            return Some(c);
+        }
+    }
+    None
+}

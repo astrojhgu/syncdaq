@@ -5,19 +5,16 @@ use lockfree_object_pool::{LinearObjectPool, LinearOwnedReusable};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use std::{
-    pin::Pin,
-    sync::{Arc, Mutex},
-};
+use std::{pin::Pin, sync::Arc};
 
-use num::{Complex, Zero};
+use num::Complex;
 
-use crate::firdecim2::firdec_worker::fir_symmetric_full_rate;
+use crate::firdecim2::firdec_worker::fir_symmetric_full_rate_streams_inplace;
 
 use super::{
     super::payload::{N_BYTE_PER_FRAME, Payload},
     I32s,
-    firdec_worker::{StreamState, resample2_streams},
+    firdec_worker::{FirStreamState, StreamState, resample2_streams},
 };
 
 pub fn with_buffer<S>(upstream: S) -> impl Stream<Item = S::Item>
@@ -65,12 +62,13 @@ pub fn decim2(
         },
     ));
 
-    let state = Arc::new(Mutex::new(StreamState::new()));
+    let state = StreamState::new();
 
     stream! {
         futures_util::pin_mut!(input);
 
         let mut batched_input = input.chunks(2);
+        let mut state = state;
         loop{
             let mut output = pool.pull_owned();
 
@@ -106,7 +104,7 @@ pub fn decim2(
                     input_raw,
                     &mut output_raw1,
                     &fir_coeffs_i32,
-                    &mut *state.lock().unwrap(),
+                    &mut state,
                     bit_shift,
                 );
 
@@ -118,19 +116,12 @@ pub fn decim2(
                     input_raw,
                     &mut output_raw2,
                     &fir_coeffs_i32,
-                    &mut *state.lock().unwrap(),
+                    &mut state,
                     bit_shift,
                 );
             }
 
             yield output;
-            // if tx.send(output).await.is_err() {
-            //     // 如果 ReceiverStream 被 drop 了，这里会退出
-            //     //println!("err");
-            //     break;
-            // }else{
-            //     //println!("a");
-            // }
         }
     }
     //});
@@ -160,55 +151,23 @@ pub fn fir_pipeline(
     bit_shift: u32,
 ) -> Pin<Box<dyn Stream<Item = LinearOwnedReusable<Payload<Complex<i16>>>> + 'static + Send>> {
     let fir_coeffs = fir_coeffs.to_vec();
-    let _fir_coeffs_i32: Vec<std::simd::Simd<i32, 16>> =
+    let fir_coeffs_i32: Vec<std::simd::Simd<i32, 16>> =
         fir_coeffs.iter().map(|&c| I32s::splat(c as i32)).collect();
     let patch_len = N_BYTE_PER_FRAME / std::mem::size_of::<Complex<i16>>();
 
-    //let (tx, rx) = mpsc::channel(buffer_size);
-    //tokio::spawn(async move {
-
-    let ntaps = fir_coeffs.len();
-    let state_len = ntaps * 2 - 1 + patch_len; // 2:1 decimation, so input is 2x output
-
-    let pool: Arc<LinearObjectPool<Payload<Complex<i16>>>> = Arc::new(LinearObjectPool::new(
-        move || {
-            //eprint!("o");
-            Payload::<Complex<i16>>::default()
-        },
-        |_v| {},
-    ));
-
     let s = stream! {
         futures_util::pin_mut!(input);
-        let mut state = vec![Complex::<i16>::zero(); state_len];
+        let mut state = FirStreamState::new();
         loop{
-            if let Some(input) = input.next().await {
+            if let Some(mut input) = input.next().await {
                 assert_eq!(input.data.len(), patch_len);
                 let input_raw = unsafe {
-                    std::slice::from_raw_parts(input.data.as_ptr() as *const i16, patch_len * 2)
+                    std::slice::from_raw_parts_mut(input.data.as_mut_ptr() as *mut i16, patch_len * 2)
                 };
 
-                let mut output = pool.pull_owned();
-                output.copy_header(&input);
-                let mut output_raw = unsafe {
-                std::slice::from_raw_parts_mut(
-                    output.data.as_mut_ptr() as *mut i16,
-                    patch_len * 2,
-                )
-                };
+                fir_symmetric_full_rate_streams_inplace(input_raw, &fir_coeffs_i32, &mut state, bit_shift);
 
-                let state_raw =
-                    unsafe { std::slice::from_raw_parts_mut(state.as_mut_ptr() as *mut i16, state_len * 2) };
-
-                fir_symmetric_full_rate(
-                    input_raw,
-                    &mut output_raw,
-                    &fir_coeffs,
-                    state_raw,
-                    bit_shift,
-                );
-
-                yield output;
+                yield input;
             }else{
                 break;
             }

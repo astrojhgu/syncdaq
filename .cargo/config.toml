@@ -1,0 +1,5 @@
+[build]
+# 本机为 x86_64 + AVX2（i9-13900H）。target-cpu=native 让 portable_simd 生成
+# AVX2 指令，SIMD 内核吞吐接近翻倍。若需移植到其他机器，改用显式 target-feature
+# 或删除本文件（回落 SSE2 基线）。
+rustflags = ["-C", "target-cpu=native"]
