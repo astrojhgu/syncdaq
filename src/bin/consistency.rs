@@ -1,17 +1,18 @@
 #![allow(incomplete_features)]
 #![feature(portable_simd)]
 
-// Behavior-consistency test for the master branch.
+// Behavior-consistency test for the ai_opt branch.
 // Feed fixed inputs to resample2 (half-band 2:1 decim) and
 // fir_symmetric_full_rate (full-rate FIR), print deterministic results.
-// Compare the output of this program against the _aiopt twin on the
-// ai_opt branch to verify behavioral consistency between branches.
+// Compare the output of this program against the _master twin on the
+// master branch to verify behavioral consistency between branches.
 
 use syncdaq::{
     firdecim2::{
         fir_coeffs::{fir_anti_aliasing_coeffs, fir_half_band_coeffs},
         firdec_worker::{
             fir_symmetric_full_rate, fir_symmetric_full_rate_plain, resample2, resample2_plain,
+            StreamState,
         },
     },
 };
@@ -70,11 +71,10 @@ fn main() {
     const N_BLOCKS: usize = 6;
     let input = gen_input(BLOCK_IN * N_BLOCKS, 0x1234_5678);
 
-    // resample2 (SIMD) — master state buffer
+    // resample2 (SIMD) — ai_opt uses StreamState
     for &bs in &bs_vals {
         let mut out_acc: Vec<i16> = Vec::new();
-        let state_len = (hb.len() - 1) * 4 + BLOCK_IN;
-        let mut state = vec![0i16; state_len];
+        let mut state = StreamState::new();
         for b in 0..N_BLOCKS {
             let inp = &input[b * BLOCK_IN..(b + 1) * BLOCK_IN];
             let mut out = vec![0i16; BLOCK_IN / 2];

@@ -59,71 +59,342 @@ pub fn resample2_plain(
     state.copy_within(n_input * 2..n_input * 2 + n_old_state * 2, 0);
 }
 
+/// 每个向量内的无边界检查加载：调用方必须保证 `src..src+32` 落在已断言过的合法区域内。
+#[inline(always)]
+unsafe fn extract_even_iq_unchecked(src: *const i16) -> Simd<i32, LANES16> {
+    let s = Simd::<i16, 32>::from_slice(unsafe { std::slice::from_raw_parts(src, 32) });
+    let picked = simd_swizzle!(
+        s,
+        [0, 1, 4, 5, 8, 9, 12, 13, 16, 17, 20, 21, 24, 25, 28, 29]
+    );
+    picked.cast::<i32>()
+}
+
+/// 已预展开系数的核心实现。`coeffs_i32` 为半带滤波器的一半系数（含中心点）的 SIMD splat。
+/// 相位语义与原 `resample2` 完全一致（中心 tap 对齐 x[2i - m_half]，块内自洽，无需前视）。
+#[inline(always)]
+pub fn resample2_prepared(
+    input: &[i16],
+    output: &mut [i16],
+    coeffs_i32: &[I32s],
+    state: &mut [i16],
+    bit_shift: u32,
+) {
+    let n_half_taps = coeffs_i32.len();
+    let m_half = n_half_taps - 1;
+    let n_input = input.len();
+    let n_output = output.len();
+
+    // 单次不变式断言，替代热循环内每次切片的边界检查。
+    // 该断言恰保证所有 raw 指针读取（base ± 2k + 32）都在 state 内：
+    //   最大读 = 2*(n_output-16) + 2*m_half + 2*m_half + 32
+    //          = 2*n_output + 4*m_half = n_input + 4*m_half <= state.len()
+    assert!(
+        state.len() >= n_input + m_half * 4,
+        "resample2: 状态空间不足"
+    );
+    assert!(
+        n_output % LANES16 == 0 && n_input % LANES16 == 0,
+        "resample2: 输入/输出长度必须为 {} 的倍数",
+        LANES16
+    );
+
+    let n_old_state = m_half * 4;
+    state[n_old_state..n_old_state + n_input].copy_from_slice(input);
+
+    let shift_vec = I32s::splat(bit_shift as i32);
+    let state_ptr = state.as_ptr();
+    let out_ptr = output.as_mut_ptr();
+    let cp = coeffs_i32.as_ptr();
+    let n_vec = n_output / LANES16;
+
+    let mut j = 0usize;
+    while j < n_vec {
+        let out_idx = j * LANES16;
+        let base = unsafe { state_ptr.add(2 * out_idx + m_half * 2) };
+
+        // --- 中心 Tap ---
+        let mut acc0 = unsafe { extract_even_iq_unchecked(base) } * unsafe { *cp };
+        let mut acc1 = I32s::splat(0);
+        let mut acc2 = I32s::splat(0);
+        let mut acc3 = I32s::splat(0);
+
+        // --- 展开循环：每轮 4 个对称 tap，4 个独立累加器打破依赖链 ---
+        let mut k = 1usize;
+        while k + 6 <= m_half {
+            let p0 = unsafe { extract_even_iq_unchecked(base.add(k * 2)) };
+            let n0 = unsafe { extract_even_iq_unchecked(base.sub(k * 2)) };
+            acc0 += (p0 + n0) * unsafe { *cp.add(k) };
+
+            let p1 = unsafe { extract_even_iq_unchecked(base.add((k + 2) * 2)) };
+            let n1 = unsafe { extract_even_iq_unchecked(base.sub((k + 2) * 2)) };
+            acc1 += (p1 + n1) * unsafe { *cp.add(k + 2) };
+
+            let p2 = unsafe { extract_even_iq_unchecked(base.add((k + 4) * 2)) };
+            let n2 = unsafe { extract_even_iq_unchecked(base.sub((k + 4) * 2)) };
+            acc2 += (p2 + n2) * unsafe { *cp.add(k + 4) };
+
+            let p3 = unsafe { extract_even_iq_unchecked(base.add((k + 6) * 2)) };
+            let n3 = unsafe { extract_even_iq_unchecked(base.sub((k + 6) * 2)) };
+            acc3 += (p3 + n3) * unsafe { *cp.add(k + 6) };
+
+            k += 8;
+        }
+
+        // 处理剩余的 0..3 个 tap
+        let mut ci = 0usize;
+        while k <= m_half {
+            let p = unsafe { extract_even_iq_unchecked(base.add(k * 2)) };
+            let n = unsafe { extract_even_iq_unchecked(base.sub(k * 2)) };
+            let c = unsafe { *cp.add(k) };
+            match ci {
+                0 => acc0 += (p + n) * c,
+                1 => acc1 += (p + n) * c,
+                2 => acc2 += (p + n) * c,
+                _ => acc3 += (p + n) * c,
+            }
+            k += 2;
+            ci += 1;
+        }
+
+        // 合并累加器
+        let acc = acc0 + acc1 + acc2 + acc3;
+
+        let shifted = acc >> shift_vec;
+        let out_simd: Simd<i16, LANES16> = shifted.cast::<i16>();
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                out_simd.as_array().as_ptr(),
+                out_ptr.add(out_idx),
+                LANES16,
+            );
+        }
+        j += 1;
+    }
+
+    state.copy_within(n_input..n_input + n_old_state, 0);
+}
+
+/// 提取 32 个 i16 中的 I（隔一个复数取 I：i16 偏移 0,4,...,28），符号扩展到 8 个 i32。
+#[inline(always)]
+unsafe fn extract_i8(src: *const i16) -> Simd<i32, 8> {
+    let s = Simd::<i16, 32>::from_slice(unsafe { std::slice::from_raw_parts(src, 32) });
+    let picked = simd_swizzle!(s, [0, 4, 8, 12, 16, 20, 24, 28]);
+    picked.cast::<i32>()
+}
+
+/// 提取 32 个 i16 中的 Q（i16 偏移 1,5,...,29），符号扩展到 8 个 i32。
+#[inline(always)]
+unsafe fn extract_q8(src: *const i16) -> Simd<i32, 8> {
+    let s = Simd::<i16, 32>::from_slice(unsafe { std::slice::from_raw_parts(src, 32) });
+    let picked = simd_swizzle!(s, [1, 5, 9, 13, 17, 21, 25, 29]);
+    picked.cast::<i32>()
+}
+
+/// 提取 32 个 i16 中奇数序复数的 I（i16 偏移 2,6,...,30），符号扩展到 8 个 i32。
+#[inline(always)]
+unsafe fn extract_oi8(src: *const i16) -> Simd<i32, 8> {
+    let s = Simd::<i16, 32>::from_slice(unsafe { std::slice::from_raw_parts(src, 32) });
+    let picked = simd_swizzle!(s, [2, 6, 10, 14, 18, 22, 26, 30]);
+    picked.cast::<i32>()
+}
+
+/// 提取 32 个 i16 中奇数序复数的 Q（i16 偏移 3,7,...,31），符号扩展到 8 个 i32。
+#[inline(always)]
+unsafe fn extract_oq8(src: *const i16) -> Simd<i32, 8> {
+    let s = Simd::<i16, 32>::from_slice(unsafe { std::slice::from_raw_parts(src, 32) });
+    let picked = simd_swizzle!(s, [3, 7, 11, 15, 19, 23, 27, 31]);
+    picked.cast::<i32>()
+}
+
+/// 连续 i32x16 加载（无边界检查，调用方保证在界内）。
+#[inline(always)]
+unsafe fn load16_i32(src: *const i32) -> Simd<i32, 16> {
+    Simd::<i32, 16>::from_slice(unsafe { std::slice::from_raw_parts(src, 16) })
+}
+
+/// 奇偶流解交织状态：E/O 为解交织且预符号扩展到 i32 的 I/Q 流。
+pub struct StreamState {
+    pub ei: Vec<i32>,
+    pub eq: Vec<i32>,
+    pub oi: Vec<i32>,
+    pub oq: Vec<i32>,
+}
+
+impl StreamState {
+    pub fn new() -> Self {
+        Self {
+            ei: Vec::new(),
+            eq: Vec::new(),
+            oi: Vec::new(),
+            oq: Vec::new(),
+        }
+    }
+}
+
+/// 奇偶流解交织版（16 输出/向量，i32x16 连续加载）。
+///
+/// 利用半带 + 2:1 抽取的结构：
+/// ```text
+///   y[i] = c0 * E[t] + Σ_j c(2j+1) * (O[t+j] + O[t-j-1])，t = i - m_half/2
+/// ```
+/// 偶数流 E 只参与中心 tap；奇数流 O 是 (m_half-1)/2+1 抽头的对称 FIR。
+/// 输入在 ingest 阶段解交织成连续 i32 流，tap 循环内为纯连续加载（无 shuffle），
+/// 完全消除交错布局下的提取/转换开销。相位与原 `resample2` 一致
+/// （中心 tap 对齐 x[2i - m_half]，块内自洽，跨帧历史由 `StreamState` 维护）。
+/// 要求 m_half 为偶数，n_input/n_output 为 32 的倍数。
+#[inline(always)]
+pub fn resample2_streams(
+    input: &[i16],
+    output: &mut [i16],
+    coeffs_i32: &[I32s],
+    state: &mut StreamState,
+    bit_shift: u32,
+) {
+    let m_half = coeffs_i32.len() - 1;
+    let n_input = input.len();
+    let n_output = output.len();
+    let n_vec16 = n_output / 32;
+
+    assert!(
+        m_half % 2 == 0,
+        "resample2_streams: 需要偶数 m_half（当前 {}）",
+        m_half
+    );
+    assert!(
+        n_output % 32 == 0 && n_input % 32 == 0,
+        "resample2_streams: 输入/输出长度必须为 32 的倍数"
+    );
+
+    let n_block = n_input / 4; // 复数输出数 N
+    let cap = n_block + m_half * 2;
+    for v in [&mut state.ei, &mut state.eq, &mut state.oi, &mut state.oq] {
+        if v.len() < cap {
+            v.resize(cap, 0);
+        }
+    }
+
+    // --- 1. ingest：每 32 i16（16 复数）解交织为 E/O 的 I/Q 流，预扩展到 i32 ---
+    let n_chunks = n_input / 32;
+    let sp = input.as_ptr();
+    let (ei, eq, oi, oq) = (&mut state.ei, &mut state.eq, &mut state.oi, &mut state.oq);
+    {
+        let m = m_half;
+        for c in 0..n_chunks {
+            let src = unsafe { sp.add(c * 32) };
+            let e_i = unsafe { extract_i8(src) };
+            let e_q = unsafe { extract_q8(src) };
+            let o_i = unsafe { extract_oi8(src) };
+            let o_q = unsafe { extract_oq8(src) };
+            let idx = m + c * 8;
+            unsafe {
+                std::ptr::copy_nonoverlapping(e_i.as_array().as_ptr(), ei.as_mut_ptr().add(idx), 8);
+                std::ptr::copy_nonoverlapping(e_q.as_array().as_ptr(), eq.as_mut_ptr().add(idx), 8);
+                std::ptr::copy_nonoverlapping(o_i.as_array().as_ptr(), oi.as_mut_ptr().add(idx), 8);
+                std::ptr::copy_nonoverlapping(o_q.as_array().as_ptr(), oq.as_mut_ptr().add(idx), 8);
+            }
+        }
+    }
+
+    // --- 2. FIR：每个迭代处理 16 个复数输出（i32x16） ---
+    let cp = coeffs_i32.as_ptr();
+    let c0 = Simd::<i32, 16>::splat(unsafe { std::ptr::read(cp.cast::<i32>()) });
+    let half = m_half / 2;
+    let j_max = (m_half - 1) / 2;
+    let shift16 = Simd::<i32, 16>::splat(bit_shift as i32);
+    let out_ptr = output.as_mut_ptr();
+    let (eip, eqp, oip, oqp) = (ei.as_ptr(), eq.as_ptr(), oi.as_ptr(), oq.as_ptr());
+
+    let mut v = 0usize;
+    while v < n_vec16 {
+        let out_idx = v * 32;
+        // t0 + m_half = 16*v - half + m_half = 16*v + half（恒非负，避免 debug 溢出）
+        let off = 16 * v + half;
+        let eb = unsafe { eip.add(off) };
+        let qb = unsafe { eqp.add(off) };
+        let ob = unsafe { oip.add(off) };
+        let obq = unsafe { oqp.add(off) };
+
+        // 中心 tap（偶数流）
+        let mut acc_i = unsafe { load16_i32(eb) } * c0;
+        let mut acc_q = unsafe { load16_i32(qb) } * c0;
+
+        // 奇数流对称 FIR
+        let mut j = 0usize;
+        while j <= j_max {
+            let c = Simd::<i32, 16>::splat(unsafe {
+                std::ptr::read(cp.add(2 * j + 1).cast::<i32>())
+            });
+            let op_i = unsafe { load16_i32(ob.add(j)) };
+            let op_q = unsafe { load16_i32(obq.add(j)) };
+            let om_i = unsafe { load16_i32(ob.sub(j + 1)) };
+            let om_q = unsafe { load16_i32(obq.sub(j + 1)) };
+            acc_i += (op_i + om_i) * c;
+            acc_q += (op_q + om_q) * c;
+            j += 1;
+        }
+
+        // 移位、转 i16、交织写回
+        let si = (acc_i >> shift16).cast::<i16>();
+        let sq = (acc_q >> shift16).cast::<i16>();
+        let ia = si.to_array();
+        let qa = sq.to_array();
+        let mut o = [0i16; 32];
+        let mut k = 0usize;
+        while k < 16 {
+            o[2 * k] = ia[k];
+            o[2 * k + 1] = qa[k];
+            k += 1;
+        }
+        unsafe { std::ptr::copy_nonoverlapping(o.as_ptr(), out_ptr.add(out_idx), 32); }
+        v += 1;
+    }
+
+    // --- 3. 历史搬运：E 保留 last half 个 t 值到 [half,2*half)；O 保留 last m_half 个到 [0,m_half) ---
+    unsafe {
+        std::ptr::copy(
+            ei.as_ptr().add(m_half + n_block - half),
+            ei.as_mut_ptr().add(half),
+            half,
+        );
+        std::ptr::copy(
+            eq.as_ptr().add(m_half + n_block - half),
+            eq.as_mut_ptr().add(half),
+            half,
+        );
+        std::ptr::copy(
+            oi.as_ptr().add(n_block),
+            oi.as_mut_ptr(),
+            m_half,
+        );
+        std::ptr::copy(
+            oq.as_ptr().add(n_block),
+            oq.as_mut_ptr(),
+            m_half,
+        );
+    }
+    state.ei.truncate(cap);
+    state.eq.truncate(cap);
+    state.oi.truncate(cap);
+    state.oq.truncate(cap);
+}
+
+/// 兼容接口：将 `&[i16]` 系数展开为 SIMD splat 后调用 [`resample2_streams`]。
 #[inline(always)]
 pub fn resample2(
     input: &[i16],
     output: &mut [i16],
     coeffs: &[i16],
-    state: &mut [i16],
+    state: &mut StreamState,
     bit_shift: u32,
 ) {
-    let coeffs_i32: Vec<std::simd::Simd<i32, 16>> =
-        coeffs.iter().map(|&c| I32s::splat(c as i32)).collect();
-
-    let n_half_taps = coeffs_i32.len();
-    let m_half = n_half_taps - 1;
-    let n_input = input.len();
-    let n_output = output.len();
-    let n_old_state = m_half * 4;
-
-    state[n_old_state..n_old_state + n_input].copy_from_slice(input);
-
-    let shift_vec = I32s::splat(bit_shift as i32);
-
-    for j in 0..(n_output / LANES16) {
-        let out_idx = j * LANES16;
-        let state_offset = 2 * out_idx + (m_half * 2);
-
-        // --- 中心 Tap ---
-        let mut acc0 = extract_even_iq(&state[state_offset..]) * coeffs_i32[0];
-        let mut acc1 = I32s::splat(0); // 第二个累加器，打破流水线依赖
-
-        // --- 展开循环 (每步处理 2 个 tap，即 4 个对称点) ---
-        let mut k = 1;
-        while k + 2 <= m_half {
-            // 第一组
-            let c_a = coeffs_i32[k];
-            let p_a = extract_even_iq(&state[state_offset + k * 2..]);
-            let n_a = extract_even_iq(&state[state_offset - k * 2..]);
-            acc0 += (p_a + n_a) * c_a;
-
-            // 第二组
-            let c_b = coeffs_i32[k + 2];
-            let p_b = extract_even_iq(&state[state_offset + (k + 2) * 2..]);
-            let n_b = extract_even_iq(&state[state_offset - (k + 2) * 2..]);
-            acc1 += (p_b + n_b) * c_b;
-
-            k += 4; // 步进 4
-        }
-
-        // 处理剩余的 k (如果有)
-        while k <= m_half {
-            let c = coeffs_i32[k];
-            let p = extract_even_iq(&state[state_offset + k * 2..]);
-            let n = extract_even_iq(&state[state_offset - k * 2..]);
-            acc0 += (p + n) * c;
-            k += 2;
-        }
-
-        // 合并累加器
-        let acc = acc0 + acc1;
-
-        let shifted = acc >> shift_vec;
-        let out_simd: Simd<i16, LANES16> = shifted.cast::<i16>();
-        output[out_idx..out_idx + LANES16].copy_from_slice(out_simd.as_array());
+    const MAX_HALF_TAPS: usize = 64;
+    assert!(coeffs.len() <= MAX_HALF_TAPS, "resample2: 系数过多");
+    let mut splat = [I32s::splat(0); MAX_HALF_TAPS];
+    for (i, &c) in coeffs.iter().enumerate() {
+        splat[i] = I32s::splat(c as i32);
     }
-
-    state.copy_within(n_input..n_input + n_old_state, 0);
+    resample2_streams(input, output, &splat[..coeffs.len()], state, bit_shift);
 }
 
 #[inline(always)]
@@ -373,6 +644,210 @@ pub fn fir_symmetric_full_rate(
     state.copy_within(input.len()..input.len() + n_old_state * 2, 0);
 }
 
+/// 全速率对称 FIR 的解交织流式状态：连续 I/Q 两个 i32 流。
+///
+/// 布局：[旧历史 (2m-1) 个复数 | 当前输入 n 个复数]。
+pub struct FirStreamState {
+    pub i: Vec<i32>,
+    pub q: Vec<i32>,
+}
+
+impl FirStreamState {
+    pub fn new() -> Self {
+        Self {
+            i: Vec::new(),
+            q: Vec::new(),
+        }
+    }
+}
+
+/// 提取 32 个 i16 中的全部 I（i16 偏移 0,2,...,30），符号扩展到 16 个 i32。
+#[inline(always)]
+unsafe fn extract_i16_wide(src: *const i16) -> Simd<i32, 16> {
+    let s = Simd::<i16, 32>::from_slice(unsafe { std::slice::from_raw_parts(src, 32) });
+    let picked = simd_swizzle!(s, [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30]);
+    picked.cast::<i32>()
+}
+
+/// 提取 32 个 i16 中的全部 Q（i16 偏移 1,3,...,31），符号扩展到 16 个 i32。
+#[inline(always)]
+unsafe fn extract_q16_wide(src: *const i16) -> Simd<i32, 16> {
+    let s = Simd::<i16, 32>::from_slice(unsafe { std::slice::from_raw_parts(src, 32) });
+    let picked = simd_swizzle!(s, [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31]);
+    picked.cast::<i32>()
+}
+
+/// 全速率对称 FIR 的解交织流式版本（抗混叠滤波器）。
+///
+/// 与 [`fir_symmetric_full_rate_plain`] 语义完全一致：
+/// ```text
+/// y[n] = Σ_k c_k * (s[n + m - 1 - k] + s[n + m + k]),  k = 0..m,  m = coeffs.len()
+/// ```
+/// 输入先解交织为连续 I/Q 两个 i32 流，tap 循环内为纯连续加载（无 shuffle），
+/// 消除交错布局下的提取/转换开销。`coeffs_i32` 需一次性预展开（每次调用重复
+/// splat 只会浪费带宽）。要求 n_input / n_output（i16）为 32 的倍数。
+#[inline(always)]
+pub fn fir_symmetric_full_rate_streams(
+    input: &[i16],
+    output: &mut [i16],
+    coeffs_i32: &[I32s],
+    state: &mut FirStreamState,
+    bit_shift: u32,
+) {
+    assert_eq!(output.len(), input.len(), "fir streams: 输入/输出长度必须相等");
+    fir_streams_core(input.as_ptr(), output.as_mut_ptr(), input.len(), coeffs_i32, state, bit_shift);
+}
+
+/// 原地版本：在同一缓冲区上完成全速率 FIR（读入 state 后才写回，in-place 安全）。
+/// 用于管线中省掉一个输出对象池的 pull/push 与头拷贝。
+#[inline(always)]
+pub fn fir_symmetric_full_rate_streams_inplace(
+    data: &mut [i16],
+    coeffs_i32: &[I32s],
+    state: &mut FirStreamState,
+    bit_shift: u32,
+) {
+    fir_streams_core(data.as_ptr(), data.as_mut_ptr(), data.len(), coeffs_i32, state, bit_shift);
+}
+
+/// 核心实现：通过 raw pointer 读写，ingest 阶段完整读入 state 后才写 output，
+/// 因此 input_ptr 与 output_ptr 允许指向同一缓冲区。
+#[inline(always)]
+fn fir_streams_core(
+    input_ptr: *const i16,
+    output_ptr: *mut i16,
+    n_input: usize,
+    coeffs_i32: &[I32s],
+    state: &mut FirStreamState,
+    bit_shift: u32,
+) {
+    let m = coeffs_i32.len();
+    assert!(m > 0, "fir streams: 系数为空");
+    assert!(
+        n_input % 32 == 0,
+        "fir streams: 输入/输出长度必须为 32 的倍数"
+    );
+
+    let n_pts = n_input / 2; // 复数样本数
+    let n_old = 2 * m - 1; // 历史复数样本数
+    let cap = n_old + n_pts;
+    for v in [&mut state.i, &mut state.q] {
+        if v.len() < cap {
+            v.resize(cap, 0);
+        }
+    }
+
+    // --- 1. ingest：每 32 i16（16 复数）解交织为 I/Q 的连续 i32 流 ---
+    let n_chunks = n_input / 32;
+    let (si, sq) = (&mut state.i, &mut state.q);
+    {
+        for c in 0..n_chunks {
+            let src = unsafe { input_ptr.add(c * 32) };
+            let iv = unsafe { extract_i16_wide(src) };
+            let qv = unsafe { extract_q16_wide(src) };
+            let idx = n_old + c * 16;
+            unsafe {
+                std::ptr::copy_nonoverlapping(iv.as_array().as_ptr(), si.as_mut_ptr().add(idx), 16);
+                std::ptr::copy_nonoverlapping(qv.as_array().as_ptr(), sq.as_mut_ptr().add(idx), 16);
+            }
+        }
+    }
+
+    // --- 2. 对称 FIR：每个迭代处理 16 个复数输出（纯连续加载） ---
+    let shift16 = I32s::splat(bit_shift as i32);
+    let (sip, sqp) = (si.as_ptr(), sq.as_ptr());
+    let cp = coeffs_i32.as_ptr();
+    let n_vec = n_pts / 16;
+
+    let mut v = 0usize;
+    while v < n_vec {
+        let n0 = v * 16;
+        let base_i = unsafe { sip.add(n0 + m - 1) };
+        let base_q = unsafe { sqp.add(n0 + m - 1) };
+
+        let mut acc_i0 = I32s::splat(0);
+        let mut acc_q0 = I32s::splat(0);
+        let mut acc_i1 = I32s::splat(0);
+        let mut acc_q1 = I32s::splat(0);
+
+        // 每轮 2 个对称 tap，2 组独立累加器打破依赖链
+        let mut k = 0usize;
+        while k + 2 <= m {
+            let c0 = unsafe { *cp.add(k) };
+            let pl_i0 = unsafe { load16_i32(base_i.sub(k)) };
+            let pr_i0 = unsafe { load16_i32(base_i.add(k + 1)) };
+            let pl_q0 = unsafe { load16_i32(base_q.sub(k)) };
+            let pr_q0 = unsafe { load16_i32(base_q.add(k + 1)) };
+            acc_i0 += (pl_i0 + pr_i0) * c0;
+            acc_q0 += (pl_q0 + pr_q0) * c0;
+
+            let c1 = unsafe { *cp.add(k + 1) };
+            let pl_i1 = unsafe { load16_i32(base_i.sub(k + 1)) };
+            let pr_i1 = unsafe { load16_i32(base_i.add(k + 2)) };
+            let pl_q1 = unsafe { load16_i32(base_q.sub(k + 1)) };
+            let pr_q1 = unsafe { load16_i32(base_q.add(k + 2)) };
+            acc_i1 += (pl_i1 + pr_i1) * c1;
+            acc_q1 += (pl_q1 + pr_q1) * c1;
+            k += 2;
+        }
+
+        // 处理剩余的 0..1 个 tap
+        while k < m {
+            let c = unsafe { *cp.add(k) };
+            let pl_i = unsafe { load16_i32(base_i.sub(k)) };
+            let pr_i = unsafe { load16_i32(base_i.add(k + 1)) };
+            let pl_q = unsafe { load16_i32(base_q.sub(k)) };
+            let pr_q = unsafe { load16_i32(base_q.add(k + 1)) };
+            acc_i0 += (pl_i + pr_i) * c;
+            acc_q0 += (pl_q + pr_q) * c;
+            k += 1;
+        }
+
+        let acc_i = acc_i0 + acc_i1;
+        let acc_q = acc_q0 + acc_q1;
+
+        let si16 = (acc_i >> shift16).cast::<i16>();
+        let sq16 = (acc_q >> shift16).cast::<i16>();
+        let ia = si16.to_array();
+        let qa = sq16.to_array();
+        let mut o = [0i16; 32];
+        let mut j = 0usize;
+        while j < 16 {
+            o[2 * j] = ia[j];
+            o[2 * j + 1] = qa[j];
+            j += 1;
+        }
+        unsafe { std::ptr::copy_nonoverlapping(o.as_ptr(), output_ptr.add(n0 * 2), 32); }
+        v += 1;
+    }
+
+    // --- 3. 历史搬运：保留末尾 n_old 个输入样本到流开头 ---
+    unsafe {
+        std::ptr::copy(si.as_ptr().add(n_pts), si.as_mut_ptr(), n_old);
+        std::ptr::copy(sq.as_ptr().add(n_pts), sq.as_mut_ptr(), n_old);
+    }
+    state.i.truncate(cap);
+    state.q.truncate(cap);
+}
+
+/// 兼容接口：将 `&[i16]` 系数展开为 SIMD splat 后调用 [`fir_symmetric_full_rate_streams`]。
+#[inline(always)]
+pub fn fir_symmetric_full_rate_streams_plain_coeffs(
+    input: &[i16],
+    output: &mut [i16],
+    coeffs: &[i16],
+    state: &mut FirStreamState,
+    bit_shift: u32,
+) {
+    const MAX_HALF_TAPS: usize = 64;
+    assert!(coeffs.len() <= MAX_HALF_TAPS, "fir streams: 系数过多");
+    let mut splat = [I32s::splat(0); MAX_HALF_TAPS];
+    for (i, &c) in coeffs.iter().enumerate() {
+        splat[i] = I32s::splat(c as i32);
+    }
+    fir_symmetric_full_rate_streams(input, output, &splat[..coeffs.len()], state, bit_shift);
+}
+
 /*
 #[inline(always)]
 pub fn fir_symmetric_full_rate(
@@ -457,6 +932,97 @@ mod tests {
     //use std::fs::File;
     //use std::io::Write;
     const N_BATCH: usize = 512;
+
+    #[test]
+    fn streams_match_plain() {
+        use super::{StreamState, resample2};
+        let coeff = fir_half_band_coeffs();
+        let bit_shift = 4;
+        let n_in = 4096usize;
+        let mut rng = 0x1234u64;
+        let mut next = move || {
+            rng = rng
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (rng >> 32) as u16
+        };
+        let input: Vec<i16> = (0..n_in).map(|_| next() as i16).collect();
+        let m_half = coeff.len() - 1;
+        let n_old_state = m_half * 4;
+        let mut state_s = StreamState::new();
+        let mut state_p = vec![0i16; n_old_state + n_in];
+        let mut out_s = vec![0i16; n_in / 2];
+        let mut out_p = vec![0i16; n_in / 2];
+        resample2(&input, &mut out_s, &coeff, &mut state_s, bit_shift);
+        resample2_plain(&input, &mut out_p, &coeff, &mut state_p, bit_shift);
+        let mut diffs = 0;
+        for i in 0..out_s.len() {
+            if out_s[i] != out_p[i] {
+                diffs += 1;
+                if diffs <= 8 {
+                    println!("  diff[{}] streams={} plain={}", i, out_s[i], out_p[i]);
+                }
+            }
+        }
+        assert_eq!(diffs, 0, "streams vs plain 不一致");
+    }
+
+    #[test]
+    fn streams_segmented_consistency() {
+        // 分段处理与一次性处理必须一致（跨帧历史由 StreamState 维护）
+        use super::{StreamState, resample2, resample2_plain};
+        let coeff = fir_half_band_coeffs();
+        let bit_shift = 4;
+        let n_in = 4096usize;
+        let mut rng = 0xdeadbeefu64;
+        let mut next = move || {
+            rng = rng
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (rng >> 32) as u16
+        };
+        let input: Vec<i16> = (0..n_in).map(|_| next() as i16).collect();
+        let m_half = coeff.len() - 1;
+        let n_old_state = m_half * 4;
+
+        // 一次性
+        let mut st_once = StreamState::new();
+        let mut out_once = vec![0i16; n_in / 2];
+        resample2(&input, &mut out_once, &coeff, &mut st_once, bit_shift);
+
+        // 分两段
+        let mut st_seg = StreamState::new();
+        let mut out_seg = vec![0i16; n_in / 2];
+        let mid = n_in / 2;
+        resample2(
+            &input[..mid],
+            &mut out_seg[..mid / 2],
+            &coeff,
+            &mut st_seg,
+            bit_shift,
+        );
+        resample2(
+            &input[mid..],
+            &mut out_seg[mid / 2..],
+            &coeff,
+            &mut st_seg,
+            bit_shift,
+        );
+
+        // plain 分段参考（验证同样分段逻辑在 plain 下一致）
+        let mut stp_once = vec![0i16; n_old_state + n_in];
+        let mut outp_once = vec![0i16; n_in / 2];
+        resample2_plain(&input, &mut outp_once, &coeff, &mut stp_once, bit_shift);
+
+        assert_eq!(out_once.len(), out_seg.len());
+        for i in 0..out_once.len() {
+            assert_eq!(
+                out_seg[i], out_once[i],
+                "分段处理在索引 {} 处不一致（streams）",
+                i
+            );
+        }
+    }
 
     #[test]
     fn unit_pulse_complex() {
@@ -574,5 +1140,101 @@ mod tests {
             );
         }
         println!("分段等效性测试通过！");
+    }
+
+    #[test]
+    fn fir_streams_match_plain() {
+        use super::{FirStreamState, fir_symmetric_full_rate_plain, fir_symmetric_full_rate_streams_plain_coeffs};
+        use crate::firdecim2::fir_coeffs::fir_anti_aliasing_coeffs;
+        let coeff = fir_anti_aliasing_coeffs();
+        let bit_shift = 4;
+        let n_in = 4096usize; // i16，2048 个复数
+        let mut rng = 0xabcdef01u64;
+        let mut next = move || {
+            rng = rng
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (rng >> 32) as u16
+        };
+        let input: Vec<i16> = (0..n_in).map(|_| next() as i16).collect();
+        let m = coeff.len();
+        let n_old_state = (m * 2 - 1) * 2; // i16
+        let mut state_s = FirStreamState::new();
+        let mut state_p = vec![0i16; n_old_state + n_in];
+        let mut out_s = vec![0i16; n_in];
+        let mut out_p = vec![0i16; n_in];
+        fir_symmetric_full_rate_streams_plain_coeffs(
+            &input,
+            &mut out_s,
+            &coeff,
+            &mut state_s,
+            bit_shift,
+        );
+        fir_symmetric_full_rate_plain(&input, &mut out_p, &coeff, &mut state_p, bit_shift);
+        let mut diffs = 0;
+        for i in 0..out_s.len() {
+            if out_s[i] != out_p[i] {
+                diffs += 1;
+                if diffs <= 8 {
+                    println!("  diff[{}] streams={} plain={}", i, out_s[i], out_p[i]);
+                }
+            }
+        }
+        assert_eq!(diffs, 0, "fir streams vs plain 不一致");
+    }
+
+    #[test]
+    fn fir_streams_segmented_consistency() {
+        use super::{FirStreamState, fir_symmetric_full_rate_streams_plain_coeffs};
+        use crate::firdecim2::fir_coeffs::fir_anti_aliasing_coeffs;
+        let coeff = fir_anti_aliasing_coeffs();
+        let bit_shift = 4;
+        let n_in = 4096usize;
+        let mut rng = 0x0f0f0f0fu64;
+        let mut next = move || {
+            rng = rng
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (rng >> 32) as u16
+        };
+        let input: Vec<i16> = (0..n_in).map(|_| next() as i16).collect();
+
+        // 一次性
+        let mut st_once = FirStreamState::new();
+        let mut out_once = vec![0i16; n_in];
+        fir_symmetric_full_rate_streams_plain_coeffs(
+            &input,
+            &mut out_once,
+            &coeff,
+            &mut st_once,
+            bit_shift,
+        );
+
+        // 分两段
+        let mut st_seg = FirStreamState::new();
+        let mut out_seg = vec![0i16; n_in];
+        let mid = n_in / 2;
+        fir_symmetric_full_rate_streams_plain_coeffs(
+            &input[..mid],
+            &mut out_seg[..mid],
+            &coeff,
+            &mut st_seg,
+            bit_shift,
+        );
+        fir_symmetric_full_rate_streams_plain_coeffs(
+            &input[mid..],
+            &mut out_seg[mid..],
+            &coeff,
+            &mut st_seg,
+            bit_shift,
+        );
+
+        for i in 0..out_once.len() {
+            assert_eq!(
+                out_seg[i], out_once[i],
+                "fir 分段处理在索引 {} 处不一致",
+                i
+            );
+        }
     }
 }
