@@ -5,13 +5,15 @@ use lockfree_object_pool::LinearOwnedReusable;
 use num::Complex;
 
 use crate::{
+    ctrl_msg::{send_cmd, CtrlMsg, Health},
+    default_cfg::DEFAULT_CTRL_PORT,
     device_discovery::get_device_info,
     payload::{Payload, n_pt_per_frame},
     sdr::Sdr16Decim,
 };
 
 use std::{
-    net::Ipv4Addr,
+    net::{Ipv4Addr, SocketAddrV4},
     slice::{from_raw_parts, from_raw_parts_mut},
 };
 
@@ -283,6 +285,36 @@ pub unsafe extern "C" fn find_all_devices(
 pub unsafe extern "C" fn device_is_alive(ip: u32) -> bool {
     let ip = Ipv4Addr::from(ip);
     get_device_info(Ipv4Addr::from(ip)).is_some()
+}
+
+/// Query the device's ADC sample rate in MSps (e.g. 320 or 100).
+/// Returns 0 if the device did not reply.
+#[unsafe(no_mangle)]
+pub extern "C" fn get_device_smp_rate(ip_u32: u32, local_ctrl_port: u16) -> u32 {
+    let ip = Ipv4Addr::from(ip_u32);
+    let remote = SocketAddrV4::new(ip, DEFAULT_CTRL_PORT);
+    let summary = send_cmd(
+        CtrlMsg::Query { msg_id: 0 },
+        &[remote],
+        SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, local_ctrl_port),
+        Some(std::time::Duration::from_secs(2)),
+        0,
+    );
+    for (_addr, msg) in &summary.normal_reply {
+        if let CtrlMsg::QueryReply {
+            msg_id: _,
+            fm_ver: _,
+            tick_cnt1: _,
+            tick_cnt2: _,
+            trans_state: _,
+            locked: _,
+            health: Health::T510Health { smp_rate, .. },
+        } = msg
+        {
+            return *smp_rate;
+        }
+    }
+    0
 }
 
 #[unsafe(no_mangle)]
