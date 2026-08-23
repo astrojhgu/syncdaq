@@ -69,7 +69,7 @@ pub enum Health {
         over_voltage_state: u32,
         over_range_state: u32,
         smp_rate: u32,
-        _z: u32,
+        fan_pulse_cnt: u32,
         #[br(count=nports)]
         pkt_cnt1: Vec<u64>,
         #[br(count=nports)]
@@ -92,7 +92,7 @@ impl Display for Health {
                 over_voltage_state,
                 over_range_state,
                 smp_rate,
-                _z,
+                fan_pulse_cnt,
                 ref pkt_cnt1,
                 ref axi_frame_cnt1,
                 ref pkt_cnt2,
@@ -101,6 +101,7 @@ impl Display for Health {
                 writeln!(f, "T510Health{{")?;
                 writeln!(f, "rfdc_restart_cnt: {}, ", rfdc_restart_cnt)?;
                 writeln!(f, "temperature: {} degC, ", temperature)?;
+                writeln!(f, "fan pulse cnt: {fan_pulse_cnt}")?;
                 writeln!(f, "nports: {}, ", nports)?;
                 writeln!(f, "smp_rate: {} MSps, ", smp_rate)?;
                 writeln!(f, "fifo_full_cnt: {}, ", fifo_full_cnt >> 16)?;
