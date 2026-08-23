@@ -42,7 +42,7 @@ fn main() {
                     nports: 8,
                     over_voltage_state: 0,
                     over_range_state: 0,
-                    _z: 0,
+                    fan_pulse_cnt: 1000,
                     smp_rate: 320,
                     fifo_full_cnt: 0,
                     pkt_cnt1: vec![0; 8],
