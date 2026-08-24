@@ -19,22 +19,60 @@ use super::{
 
 type DTYPE = i16;
 
-pub fn start_decim_pipeline(
+/// 将 N 级 1/2 下抽样按相对负载（1/2^k）贪心分组。
+///
+/// 第 k 级输入采样率 = R/2^k，CPU 负载正比于输入率 → 相对负载 = 1/2^k。
+/// 一组内累计相对负载 ≤ budget（默认 1.0 ≈ 一个 P 核的负载）即并入同一 worker
+/// 线程，避免级联后级低采样率阶段各自独占一个核。
+/// 相对负载和为 Σ1/2^k → 默认 budget=1.0 时第一级独占、其余各级合并为一个 worker。
+/// budget 可用环境变量 `SYNCDAQ_DECIM_BUDGET` 覆盖（越小越保守、worker 越多）。
+fn group_decim_stages(n_stages: usize, budget: f64) -> Vec<(usize, usize)> {
+    let mut groups = Vec::new();
+    let mut start = 0usize;
+    let mut load = 0.0f64;
+    for k in 0..n_stages {
+        let rel = 1.0 / (1u64 << k) as f64;
+        if load > 0.0 && load + rel > budget {
+            groups.push((start, k));
+            start = k;
+            load = 0.0;
+        }
+        load += rel;
+    }
+    if start < n_stages {
+        groups.push((start, n_stages));
+    }
+    groups
+}
+
+fn decim_budget() -> f64 {
+    std::env::var("SYNCDAQ_DECIM_BUDGET")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|v| *v > 0.0)
+        .unwrap_or(1.0)
+}
+
+/// 一个 worker 线程依次执行一组 1/2 下抽样阶段。
+///
+/// 每次读取 2^n 个输入包（n = 组内阶段数），逐级两两合并（每级包数减半、
+/// pkt_cnt 除以 2），最终输出 1 个包。各级使用各自独立的 `StreamState`。
+fn start_decim_group(
     recv: Receiver<LinearOwnedReusable<Payload<Complex<DTYPE>>>>,
     send: Sender<LinearOwnedReusable<Payload<Complex<DTYPE>>>>,
-    fir_coeffs: &[DTYPE],
-    bit_shift: u32,
+    fir_coeffs_i32: Vec<I32s>,
+    bit_shifts: Vec<u32>,
 ) -> JoinHandle<()> {
-    // Implementation of the decimation pipeline start logic
-    let fir_coeffs = fir_coeffs.to_vec();
-    let fir_coeffs_i32: Vec<I32s> = fir_coeffs.iter().map(|&c| I32s::splat(c as i32)).collect();
     let patch_len = N_BYTE_PER_FRAME / std::mem::size_of::<Complex<DTYPE>>();
+    let n_stages = bit_shifts.len();
+    let batch = 1usize << n_stages;
 
     std::thread::spawn(move || {
         if let Some(core) = claim_worker_core() {
             pin_to_core(core);
         }
-        let mut state = StreamState::new();
+        // 每级各自的流状态（各级是不同的流，历史不能共用）
+        let mut states: Vec<StreamState> = (0..n_stages).map(|_| StreamState::new()).collect();
 
         let pool: Arc<LinearObjectPool<Payload<Complex<DTYPE>>>> = Arc::new(LinearObjectPool::new(
             move || {
@@ -44,67 +82,80 @@ pub fn start_decim_pipeline(
             |_v| {},
         ));
 
-        // 批量 4 包输入 → 2 包输出，摊薄通道/线程唤醒开销
         loop {
-            let mut out1 = pool.pull_owned();
-            let mut out2 = pool.pull_owned();
-            let out1_raw = unsafe {
-                std::slice::from_raw_parts_mut(
-                    out1.data.as_mut_ptr() as *mut DTYPE,
-                    patch_len * 2,
-                )
-            };
-            let out2_raw = unsafe {
-                std::slice::from_raw_parts_mut(
-                    out2.data.as_mut_ptr() as *mut DTYPE,
-                    patch_len * 2,
-                )
-            };
+            // 1. 读取 batch = 2^n 个输入包
+            let mut cur: Vec<LinearOwnedReusable<Payload<Complex<DTYPE>>>> =
+                Vec::with_capacity(batch);
+            for _ in 0..batch {
+                match recv.recv() {
+                    Ok(p) => cur.push(p),
+                    Err(_) => return,
+                }
+            }
 
-            let input1 = match recv.recv() {
-                Ok(p) => p,
-                Err(_) => break,
-            };
-            let input2 = match recv.recv() {
-                Ok(p) => p,
-                Err(_) => break,
-            };
-            let input3 = match recv.recv() {
-                Ok(p) => p,
-                Err(_) => break,
-            };
-            let input4 = match recv.recv() {
-                Ok(p) => p,
-                Err(_) => break,
-            };
+            // 2. 逐级处理：每级把 cur 两两合并减半
+            for (si, &shift) in bit_shifts.iter().enumerate() {
+                let half = cur.len() / 2;
+                let mut next: Vec<LinearOwnedReusable<Payload<Complex<DTYPE>>>> =
+                    Vec::with_capacity(half);
+                for i in 0..half {
+                    let mut out = pool.pull_owned();
+                    let out_raw = unsafe {
+                        std::slice::from_raw_parts_mut(
+                            out.data.as_mut_ptr() as *mut DTYPE,
+                            patch_len * 2,
+                        )
+                    };
+                    let i1 = unsafe {
+                        std::slice::from_raw_parts(
+                            cur[2 * i].data.as_ptr() as *const DTYPE,
+                            patch_len * 2,
+                        )
+                    };
+                    let i2 = unsafe {
+                        std::slice::from_raw_parts(
+                            cur[2 * i + 1].data.as_ptr() as *const DTYPE,
+                            patch_len * 2,
+                        )
+                    };
+                    resample2_streams(
+                        i1,
+                        &mut out_raw[..patch_len],
+                        &fir_coeffs_i32,
+                        &mut states[si],
+                        shift,
+                    );
+                    resample2_streams(
+                        i2,
+                        &mut out_raw[patch_len..],
+                        &fir_coeffs_i32,
+                        &mut states[si],
+                        shift,
+                    );
+                    out.copy_header(&cur[2 * i]);
+                    out.pkt_cnt /= 2;
+                    next.push(out);
+                }
+                cur = next;
+            }
 
-            out1.copy_header(&input1);
-            out1.pkt_cnt /= 2;
-            let i1 = unsafe {
-                std::slice::from_raw_parts(input1.data.as_ptr() as *const DTYPE, patch_len * 2)
-            };
-            let i2 = unsafe {
-                std::slice::from_raw_parts(input2.data.as_ptr() as *const DTYPE, patch_len * 2)
-            };
-            resample2_streams(i1, &mut out1_raw[..patch_len], &fir_coeffs_i32, &mut state, bit_shift);
-            resample2_streams(i2, &mut out1_raw[patch_len..], &fir_coeffs_i32, &mut state, bit_shift);
-
-            out2.copy_header(&input3);
-            out2.pkt_cnt /= 2;
-            let i3 = unsafe {
-                std::slice::from_raw_parts(input3.data.as_ptr() as *const DTYPE, patch_len * 2)
-            };
-            let i4 = unsafe {
-                std::slice::from_raw_parts(input4.data.as_ptr() as *const DTYPE, patch_len * 2)
-            };
-            resample2_streams(i3, &mut out2_raw[..patch_len], &fir_coeffs_i32, &mut state, bit_shift);
-            resample2_streams(i4, &mut out2_raw[patch_len..], &fir_coeffs_i32, &mut state, bit_shift);
-
-            if send.send(out1).is_err() || send.send(out2).is_err() {
-                break;
+            // 3. 逐级处理完后 cur 恰好 1 个包
+            let out = cur.pop().expect("分组 worker 输出不应为空");
+            if send.send(out).is_err() {
+                return;
             }
         }
     })
+}
+
+pub fn start_decim_pipeline(
+    recv: Receiver<LinearOwnedReusable<Payload<Complex<DTYPE>>>>,
+    send: Sender<LinearOwnedReusable<Payload<Complex<DTYPE>>>>,
+    fir_coeffs: &[DTYPE],
+    bit_shift: u32,
+) -> JoinHandle<()> {
+    let fir_coeffs_i32: Vec<I32s> = fir_coeffs.iter().map(|&c| I32s::splat(c as i32)).collect();
+    start_decim_group(recv, send, fir_coeffs_i32, vec![bit_shift])
 }
 
 pub fn start_decim_pipeline_chain(
@@ -115,17 +166,27 @@ pub fn start_decim_pipeline_chain(
     Vec<JoinHandle<()>>,
     Receiver<LinearOwnedReusable<Payload<Complex<DTYPE>>>>,
 ) {
-    bit_shifts.iter().fold((Vec::with_capacity(bit_shifts.len()), recv), 
-        |(mut handles, curr_recv), &shift| {
-            let (send_next, recv_next) = crossbeam::channel::unbounded();
-            
-            // 启动当前阶段，传入 curr_recv，产生新的 handle
-            handles.push(start_decim_pipeline(curr_recv, send_next, fir_coeffs, shift));
-            
-            // 返回更新后的元组，供下一轮使用
-            (handles, recv_next)
-        }
-    )
+    let fir_coeffs_i32: Vec<I32s> = fir_coeffs.iter().map(|&c| I32s::splat(c as i32)).collect();
+    let budget = decim_budget();
+    let groups = group_decim_stages(bit_shifts.len(), budget);
+    if groups.len() > 1 {
+        eprintln!(
+            "decim: {} 级分组为 {} 个 worker (budget={})",
+            bit_shifts.len(),
+            groups.len(),
+            budget
+        );
+    }
+
+    let mut handles = Vec::with_capacity(groups.len());
+    let mut curr_recv = recv;
+    for (s, e) in groups {
+        let (send_next, recv_next) = crossbeam::channel::unbounded();
+        let shifts = bit_shifts[s..e].to_vec();
+        handles.push(start_decim_group(curr_recv, send_next, fir_coeffs_i32.clone(), shifts));
+        curr_recv = recv_next;
+    }
+    (handles, curr_recv)
 }
 
 
@@ -189,4 +250,23 @@ pub fn start_fir_pipeline(
 
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::group_decim_stages;
+
+    #[test]
+    fn grouping_packs_low_rate_stages() {
+        // budget 1.0：第一级独立，其余各级合并进第二个 worker
+        assert_eq!(group_decim_stages(1, 1.0), vec![(0, 1)]);
+        assert_eq!(group_decim_stages(3, 1.0), vec![(0, 1), (1, 3)]);
+        assert_eq!(group_decim_stages(6, 1.0), vec![(0, 1), (1, 6)]);
+        // 预算收紧 → 分组更多
+        assert_eq!(group_decim_stages(4, 0.75), vec![(0, 1), (1, 3), (3, 4)]);
+        // 预算放宽 → 两级可以合并
+        assert_eq!(group_decim_stages(2, 1.5), vec![(0, 2)]);
+        // 空链
+        assert_eq!(group_decim_stages(0, 1.0), Vec::<(usize, usize)>::new());
+    }
 }
