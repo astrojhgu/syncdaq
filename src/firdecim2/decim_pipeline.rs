@@ -254,7 +254,11 @@ pub fn start_fir_pipeline(
 
 #[cfg(test)]
 mod tests {
-    use super::group_decim_stages;
+    use super::*;
+    use crate::firdecim2::fir_coeffs::fir_half_band_coeffs;
+    use lockfree_object_pool::{LinearObjectPool, LinearOwnedReusable};
+    use num::Complex;
+    use std::sync::Arc;
 
     #[test]
     fn grouping_packs_low_rate_stages() {
@@ -268,5 +272,78 @@ mod tests {
         assert_eq!(group_decim_stages(2, 1.5), vec![(0, 2)]);
         // 空链
         assert_eq!(group_decim_stages(0, 1.0), Vec::<(usize, usize)>::new());
+    }
+
+    fn make_inputs(n: usize) -> Vec<LinearOwnedReusable<Payload<Complex<i16>>>> {
+        let patch_len = N_BYTE_PER_FRAME / std::mem::size_of::<Complex<i16>>();
+        let pool: Arc<LinearObjectPool<Payload<Complex<i16>>>> = Arc::new(LinearObjectPool::new(
+            || Payload::<Complex<i16>>::default(),
+            |_v| {},
+        ));
+        (0..n)
+            .map(|k| {
+                let mut p = pool.pull_owned();
+                p.pkt_cnt = k as u64;
+                for i in 0..patch_len {
+                    p.data[i] = Complex::new(
+                        ((k as i16) * 3 + (i as i16 % 200) - 100) as i16,
+                        ((k as i16) * 7 + ((i as i16 / 2) % 200) - 100) as i16,
+                    );
+                }
+                p
+            })
+            .collect()
+    }
+
+    fn collect_output(
+        tx: Sender<LinearOwnedReusable<Payload<Complex<i16>>>>,
+        rx: Receiver<LinearOwnedReusable<Payload<Complex<i16>>>>,
+    ) -> Vec<LinearOwnedReusable<Payload<Complex<i16>>>> {
+        drop(tx); // 断开输入，让 worker 退出
+        rx.iter().collect()
+    }
+
+    /// 分组链（新）与逐级单阶段 worker 链（旧）在相同确定性输入下必须逐包一致。
+    #[test]
+    fn grouped_chain_matches_per_stage_chain() {
+        let coeffs = fir_half_band_coeffs();
+        let shifts = [13u32, 15, 12];
+        let n_input = 16; // 3 级 → 16 输入 = 2 输出
+
+        // --- 旧拓扑：逐级单阶段 worker 链 ---
+        let (tx_old, rx_old) = crossbeam::channel::unbounded();
+        let mut crx = rx_old;
+        let mut handles_old = Vec::new();
+        for &s in &shifts {
+            let (tx, rx) = crossbeam::channel::unbounded();
+            handles_old.push(super::start_decim_pipeline(crx, tx, &coeffs, s));
+            crx = rx;
+        }
+        for p in make_inputs(n_input) {
+            tx_old.send(p).unwrap();
+        }
+        let out_old = collect_output(tx_old, crx);
+        drop(handles_old);
+
+        // --- 新拓扑：分组链 ---
+        let (tx_new, rx_new) = crossbeam::channel::unbounded();
+        let (handles_new, rnew) = super::start_decim_pipeline_chain(rx_new, &coeffs, &shifts);
+        for p in make_inputs(n_input) {
+            tx_new.send(p).unwrap();
+        }
+        let out_new = collect_output(tx_new, rnew);
+        drop(handles_new);
+
+        assert_eq!(
+            out_old.len(),
+            out_new.len(),
+            "输出包数不一致: 旧 {} vs 新 {}",
+            out_old.len(),
+            out_new.len()
+        );
+        for (i, (a, b)) in out_old.iter().zip(out_new.iter()).enumerate() {
+            assert_eq!(a.pkt_cnt, b.pkt_cnt, "输出[{}] pkt_cnt 不一致", i);
+            assert_eq!(a.data, b.data, "输出[{}] 数据不一致", i);
+        }
     }
 }
