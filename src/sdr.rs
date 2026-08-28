@@ -21,8 +21,14 @@ use crate::{
     },
     payload::{N_BYTE_PER_FRAME, Payload},
     pipeline::recv_pkt,
-    utils::pin_current_thread,
+    utils::{claim_worker_core, pin_current_thread, pin_to_core, set_recv_buffer_size},
 };
+
+/// UDP 接收缓冲大小。默认 SO_RCVBUF 偏小，320 MSps 突发下容易丢包；
+/// 丢包后 `recv_pkt` 会用全零补齐（`copy_header` 只拷头），形成时域整块零，
+/// FFT 后表现为宽带干扰。在此显式放大。注意：值须能装进 `libc::c_int`（32 位），
+/// 过大会溢出成负数导致 `setsockopt` 行为异常；内核仍会按 `net.core.rmem_max` 截断。
+const RX_SOCKET_BUFFER: usize = 256 * 1024 * 1024;
 
 pub struct SdrCtrl {
     pub remote_ctrl_addr: SocketAddrV4,
@@ -126,6 +132,7 @@ impl Sdr {
 
         let payload_socket =
             UdpSocket::bind(local_payload_addr).expect("failed to bind payload socket");
+        let _ = set_recv_buffer_size(&payload_socket, RX_SOCKET_BUFFER);
 
         send_cmd(
             CtrlMsg::StreamStop { msg_id: 0 },
@@ -235,6 +242,7 @@ impl Sdr16Decim {
         self.destroy_recv_thread();
         let payload_socket =
             UdpSocket::bind(self.local_payload_addr).expect("failed to bind payload socket");
+        let _ = set_recv_buffer_size(&payload_socket, RX_SOCKET_BUFFER);
 
         let nbuf = 128;
 
@@ -243,6 +251,10 @@ impl Sdr16Decim {
             .store(true, std::sync::atomic::Ordering::Relaxed);
         let running1 = self.running.clone();
         let rx_thread = std::thread::spawn(|| {
+            // recv 线程也钉到专用核，避免被其它（如 GQRX 取数）线程挤占导致 UDP 丢包
+            if let Some(core) = claim_worker_core() {
+                pin_to_core(core);
+            }
             recv_pkt::<Complex<i16>>(payload_socket.into(), tx_payload, running1)
         });
         let fir_coeffs = fir_half_band_coeffs();
