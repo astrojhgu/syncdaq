@@ -598,7 +598,7 @@ impl Display for CtrlMsg {
             }
 
             CtrlMsg::ClrOvReply { msg_id } => {
-                writeln!(f, "InitReply {{msg_id: {msg_id}}}")
+                writeln!(f, "ClrOvReply {{msg_id: {msg_id}}}")
             }
 
             CtrlMsg::XGbeCfgSingle {
