@@ -1,4 +1,4 @@
 - !BitShift
   msg_id: 0
-  shift_bits: 8
-  
+  port_id: 0
+  lsb_bit_idx: 8

@@ -1,0 +1,24 @@
+- !QueryBitShift
+  msg_id: 0
+  port_id: 0
+- !QueryBitShift
+  msg_id: 0
+  port_id: 1
+- !QueryBitShift
+  msg_id: 0
+  port_id: 2
+- !QueryBitShift
+  msg_id: 0
+  port_id: 3
+- !QueryBitShift
+  msg_id: 0
+  port_id: 4
+- !QueryBitShift
+  msg_id: 0
+  port_id: 5
+- !QueryBitShift
+  msg_id: 0
+  port_id: 6
+- !QueryBitShift
+  msg_id: 0
+  port_id: 7

@@ -234,9 +234,17 @@ pub enum CtrlMsg {
     #[brw(magic(0xff_00_02_05_u32))]
     StreamStopReply { msg_id: u32 },
     #[brw(magic(0x06_u32))]
-    BitShift { msg_id: u32, shift_bits: u32 },
+    BitShift {
+        msg_id: u32,
+        port_id: u32,
+        lsb_bit_idx: u32,
+    },
     #[brw(magic(0xff_00_00_06_u32))]
     BitShiftReply { msg_id: u32 },
+    #[brw(magic(0x01_06_u32))]
+    QueryBitShift { msg_id: u32, port_id: u32 },
+    #[brw(magic(0xff_00_01_06_u32))]
+    QueryBitShiftReply { msg_id: u32, lsb_bit_idx: u32 },
     #[brw(magic(0x07_u32))]
     PwrCtrl { msg_id: u32, op_code: u32 },
     #[brw(magic(0xff_00_00_07_u32))]
@@ -579,12 +587,30 @@ impl Display for CtrlMsg {
             CtrlMsg::StreamStopReply { msg_id } => {
                 writeln!(f, "StreamStopReply{{msg_id: {msg_id}}}")
             }
-            CtrlMsg::BitShift { msg_id, shift_bits } => {
-                write!(f, "Bitshift{{ msg_id: {msg_id} shift_bits:{shift_bits},")?;
-                writeln!(f, "}}")
+            CtrlMsg::BitShift {
+                msg_id,
+                port_id,
+                lsb_bit_idx,
+            } => {
+                writeln!(
+                    f,
+                    "BitShift{{ msg_id: {msg_id}, port_id: {port_id}, lsb_bit_idx: {lsb_bit_idx} }}"
+                )
             }
             CtrlMsg::BitShiftReply { msg_id } => {
-                writeln!(f, "Bitshift{{msg_id: {msg_id}}}")
+                writeln!(f, "BitShiftReply{{msg_id: {msg_id}}}")
+            }
+            CtrlMsg::QueryBitShift { msg_id, port_id } => {
+                writeln!(f, "QueryBitShift{{ msg_id: {msg_id}, port_id: {port_id} }}")
+            }
+            CtrlMsg::QueryBitShiftReply {
+                msg_id,
+                lsb_bit_idx,
+            } => {
+                writeln!(
+                    f,
+                    "QueryBitShiftReply{{ msg_id: {msg_id}, lsb_bit_idx: {lsb_bit_idx} }}"
+                )
             }
             CtrlMsg::PwrCtrl { msg_id, op_code } => {
                 writeln!(f, "PwrCtrl{{msg_id: {msg_id}, op_code: {op_code}}}")
@@ -938,6 +964,8 @@ impl CtrlMsg {
             StreamStopReply { msg_id } => *msg_id = mid,
             BitShift { msg_id, .. } => *msg_id = mid,
             BitShiftReply { msg_id, .. } => *msg_id = mid,
+            QueryBitShift { msg_id, .. } => *msg_id = mid,
+            QueryBitShiftReply { msg_id, .. } => *msg_id = mid,
             PwrCtrl { msg_id, .. } => *msg_id = mid,
             PwrCtrlReply { msg_id, .. } => *msg_id = mid,
             ClrOv { msg_id, .. } => *msg_id = mid,
@@ -1003,6 +1031,8 @@ impl CtrlMsg {
             StreamStopReply { msg_id } => *msg_id,
             BitShift { msg_id, .. } => *msg_id,
             BitShiftReply { msg_id, .. } => *msg_id,
+            QueryBitShift { msg_id, .. } => *msg_id,
+            QueryBitShiftReply { msg_id, .. } => *msg_id,
             PwrCtrl { msg_id, .. } => *msg_id,
             PwrCtrlReply { msg_id } => *msg_id,
             ClrOv { msg_id } => *msg_id,

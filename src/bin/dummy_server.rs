@@ -18,6 +18,7 @@ fn main() {
     let args = Args::parse();
     let socket = UdpSocket::bind(args.addr).unwrap();
     socket.set_nonblocking(false).unwrap();
+    let mut shifts = std::collections::BTreeMap::<u32, u32>::new();
     loop {
         let mut buf = vec![0_u8; 9000];
         let (sz, addr) = socket.recv_from(&mut buf).unwrap();
@@ -90,6 +91,18 @@ fn main() {
             //StreamStartReply { msg_id } => *msg_id = mid,
             StreamStop { msg_id } => StreamStopReply { msg_id },
             //StreamStopReply { msg_id } => *msg_id = mid,
+            BitShift {
+                msg_id,
+                port_id,
+                lsb_bit_idx,
+            } => {
+                shifts.insert(port_id, lsb_bit_idx);
+                BitShiftReply { msg_id }
+            }
+            QueryBitShift { msg_id, port_id } => QueryBitShiftReply {
+                msg_id,
+                lsb_bit_idx: shifts.get(&port_id).copied().unwrap_or(0),
+            },
             ClrOv { msg_id } => ClrOvReply { msg_id },
 
             PwrCtrl { msg_id, .. } => PwrCtrlReply { msg_id },
