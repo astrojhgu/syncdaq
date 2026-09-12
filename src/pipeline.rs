@@ -180,6 +180,7 @@ pub fn recv_pkt<T>(
             println!("start time:{local_time}");
             println!("==================================");
         }
+        assert!(payload.port_id < 8);
 
         while let Some(ref mut c) = next_cnt {
             //let current_cnt = c + 1;
