@@ -45,6 +45,8 @@ fn main() {
                     over_range_state: 0,
                     fan_pulse_cnt: 1000,
                     smp_rate: 320,
+                    smp_bits: 16,
+                    iq_mode: 1,
                     fifo_full_cnt: 0,
                     pkt_cnt1: vec![0; 8],
                     axi_frame_cnt1: vec![0; 8],

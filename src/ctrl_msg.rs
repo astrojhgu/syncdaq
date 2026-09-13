@@ -69,6 +69,8 @@ pub enum Health {
         over_voltage_state: u32,
         over_range_state: u32,
         smp_rate: u32,
+        smp_bits: u32,
+        iq_mode: u32,
         fan_pulse_cnt: u32,
         #[br(count=nports)]
         pkt_cnt1: Vec<u64>,
@@ -92,6 +94,8 @@ impl Display for Health {
                 over_voltage_state,
                 over_range_state,
                 smp_rate,
+                smp_bits,
+                iq_mode,
                 fan_pulse_cnt,
                 ref pkt_cnt1,
                 ref axi_frame_cnt1,
@@ -104,6 +108,8 @@ impl Display for Health {
                 writeln!(f, "fan pulse cnt: {fan_pulse_cnt}")?;
                 writeln!(f, "nports: {}, ", nports)?;
                 writeln!(f, "smp_rate: {} MSps, ", smp_rate)?;
+                writeln!(f, "smp_bits: {}, ", smp_bits)?;
+                writeln!(f, "fmt: {}, ", if iq_mode == 1 { "IQ" } else { "real" })?;
                 writeln!(f, "fifo_full_cnt: {}, ", fifo_full_cnt >> 16)?;
                 writeln!(f, "fifo_len: {}, ", fifo_full_cnt & 0xffff)?;
                 writeln!(f, "over voltage state: {:x}", over_voltage_state)?;
@@ -1073,6 +1079,26 @@ impl CtrlMsg {
     }
 }
 
+/// 校验 QueryReply 的线上长度（20260913 加入，配合 smp_bits/iq_mode）。
+/// C 端 udp_server.h 的 QueryReply 一旦出现隐式填充、字段增删或顺序变化，
+/// 这里会立刻报出来，避免 host 静默按错位解析。
+/// 期望长度 = 72B 前缀 + 4 个 u64 数组 × nports。
+pub fn check_reply_layout(reply: &CtrlMsg, consumed: usize, recv_len: usize) {
+    if let CtrlMsg::QueryReply {
+        health: Health::T510Health { nports, .. },
+        ..
+    } = reply
+    {
+        let expect = 72 + 32 * (*nports as usize);
+        if consumed != expect || recv_len != expect {
+            eprintln!(
+                "⚠ QueryReply 长度异常：期望 {expect}B（nports={nports}），实收 {recv_len}B、解析消耗 {consumed}B \
+                 —— 固件与主机的 QueryReply 布局不一致（查 udp_server.h 字段/对齐 与 ctrl_msg.rs 的 Health）"
+            );
+        }
+    }
+}
+
 pub fn print_bytes(x: &[u8]) {
     for (i, w) in x.chunks(4).enumerate() {
         for &b in w {
@@ -1157,6 +1183,7 @@ where
             let buf1 = std::mem::replace(&mut buf, vec![0_u8; 9000]);
             let mut cursor = Cursor::new(buf1);
             let reply = CtrlMsg::read(&mut cursor).expect("failed to read reply");
+            check_reply_layout(&reply, cursor.position() as usize, l);
 
             let msg_id = reply.get_msg_id();
             if let CtrlMsg::InvalidMsg { .. } = reply {
@@ -1203,6 +1230,7 @@ where
 
             let mut cursor = Cursor::new(buf.clone());
             let reply = CtrlMsg::read(&mut cursor).expect("failed to read reply");
+            check_reply_layout(&reply, cursor.position() as usize, l);
             println!(
                 "{} \n{}",
                 Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
@@ -1300,6 +1328,7 @@ where
         let buf1 = std::mem::replace(&mut buf, vec![0_u8; 9000]);
         let mut cursor = Cursor::new(buf1);
         let reply = CtrlMsg::read(&mut cursor).expect("failed to read reply");
+        check_reply_layout(&reply, cursor.position() as usize, l);
 
         let msg_id = reply.get_msg_id();
         if let CtrlMsg::InvalidMsg { .. } = reply {
@@ -1342,6 +1371,7 @@ where
 
         let mut cursor = Cursor::new(buf.clone());
         let reply = CtrlMsg::read(&mut cursor).expect("failed to read reply");
+        check_reply_layout(&reply, cursor.position() as usize, l);
         println!(
             "{} \n{}",
             Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
@@ -1365,4 +1395,48 @@ where
         );
     }
     reply_summary
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    /// 锁定 QueryReply 的线上布局（与 C 端 udp_server.h 一一对应）：
+    /// 总长 328B，smp_bits 在偏移 60，iq_mode 在偏移 64。
+    #[test]
+    fn query_reply_wire_layout() {
+        let msg = CtrlMsg::QueryReply {
+            msg_id: 1,
+            fm_ver: 2,
+            tick_cnt1: 3,
+            tick_cnt2: 4,
+            trans_state: 5,
+            locked: 6,
+            health: Health::T510Health {
+                rfdc_restart_cnt: 7,
+                temperature: 40.0,
+                nports: 8,
+                fifo_full_cnt: 0,
+                over_voltage_state: 0,
+                over_range_state: 0,
+                smp_rate: 100,
+                smp_bits: 0xAABB_CCDD,
+                iq_mode: 0x1122_3344,
+                fan_pulse_cnt: 9,
+                pkt_cnt1: vec![0; 8],
+                axi_frame_cnt1: vec![0; 8],
+                pkt_cnt2: vec![0; 8],
+                axi_frame_cnt2: vec![0; 8],
+            },
+        };
+        let mut buf = Cursor::new(Vec::new());
+        msg.write(&mut buf).expect("write");
+        let b = buf.into_inner();
+        assert_eq!(b.len(), 328, "QueryReply 线上长度应为 328B");
+        assert_eq!(&b[0..4], &0xff_00_00_01_u32.to_le_bytes(), "msg_type@0");
+        assert_eq!(&b[56..60], &100_u32.to_le_bytes(), "smp_rate@56");
+        assert_eq!(&b[60..64], &0xAABB_CCDD_u32.to_le_bytes(), "smp_bits@60");
+        assert_eq!(&b[64..68], &0x1122_3344_u32.to_le_bytes(), "iq_mode@64");
+    }
 }
