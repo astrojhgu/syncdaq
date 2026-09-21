@@ -9,6 +9,8 @@ pub mod firdecim2;
 pub mod payload;
 pub mod pipeline;
 pub mod sdr;
+pub mod tftp_server;
+pub mod tftp_supervisor;
 pub mod utils;
 pub mod device_discovery;
 pub mod default_cfg;

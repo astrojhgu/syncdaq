@@ -383,8 +383,27 @@ pub enum CtrlMsg {
     },
     #[brw(magic(0xff_00_20_02_u32))]
     SwitchFWReply { msg_id: u32, succeeded: u32 },
+    /// 重启板子 / 控制看门狗喂狗。`mode` 决定用哪种机制：
+    ///   1 = 停止喂狗，让看门狗超时（约 30s）后复位（用于验证看门狗；
+    ///       收到 RebootReply 后板子**不会立刻**掉线，约 30s 后才掉）
+    ///   2 = 恢复喂狗，**本命令不重启板子**（给 mode=1 一个反悔手段）
+    ///   其它取值（含 0）= 普通重启：立即触发全芯片软 POR
+    ///       （写 CRL_APB.RESET_CTRL 的 External POR 触发位，含重新配置 PL）
+    ///
+    /// 未定义的 mode 值一律回落到"普通重启"，是为了**方便回落**。
+    ///
+    /// 线上布局（小端，共 12B）：magic(4) + msg_id(4) + mode(4)，`mode` 在偏移 8。
+    /// 固件侧把 `mode` 当成**可选字段**（只要求前 8 字节），
+    /// 读不到就按 0 处理（= 普通重启，与老行为一致）。
     #[brw(magic(0x00_00_00_ff_u32))]
-    Reboot { msg_id: u32 },
+    Reboot {
+        msg_id: u32,
+        /// YAML 里漏写 `mode` 时按 0 处理（= 普通重启）。
+        /// 注意 `#[serde(default)]` 要加在**字段**上；加在变体上 serde 会报
+        /// `unknown serde variant attribute 'default'`。
+        #[serde(default)]
+        mode: u32,
+    },
     #[brw(magic(0xff_00_00_ff_u32))]
     RebootReply { msg_id: u32 },
 }
@@ -932,8 +951,8 @@ impl Display for CtrlMsg {
                     "
                 )
             }
-            CtrlMsg::Reboot { msg_id } => {
-                writeln!(f, "Reboot{{msg_id:{msg_id}}}")
+            CtrlMsg::Reboot { msg_id, mode } => {
+                writeln!(f, "Reboot{{msg_id:{msg_id} mode:{mode}}}")
             }
             CtrlMsg::RebootReply { msg_id } => {
                 writeln!(f, "RebootReply{{msg_id:{msg_id}}}")
