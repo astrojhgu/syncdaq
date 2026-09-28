@@ -66,7 +66,12 @@ impl SdrCtrl {
             let cmd = CtrlMsg::MixerSet {
                 msg_id: 0,
                 nports: 8,
-                freq: vec![-freq_mega_hz; 8],
+                // 本振频率一律送**正值**：-Q 由 FPGA 侧的 reset_mixer()
+                // （各工程 sw/daq_sys/src/rfdc.c）统一取负一次实现。
+                // PL 的 "Invert Q Output" 在 Vivado/Vitis 2025.2 上会被
+                // XRFdc_SetFineMixer() 覆盖掉，不能依赖。
+                // 详见 sw/daq_sys/README.md 的「修改日志 / 20260928」。
+                freq: vec![freq_mega_hz; 8],
                 phase: vec![0.0; 8],
                 sync: sync,
             };
