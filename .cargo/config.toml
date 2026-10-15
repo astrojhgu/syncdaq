@@ -1,5 +1,3 @@
-[build]
-# 本机为 x86_64 + AVX2（i9-13900H）。target-cpu=native 让 portable_simd 生成
-# AVX2 指令，SIMD 内核吞吐接近翻倍。若需移植到其他机器，改用显式 target-feature
-# 或删除本文件（回落 SSE2 基线）。
-rustflags = ["-C", "target-cpu=native"]
+# 已移除 `-C target-cpu=native`：它把代码绑定到「编译机」的 CPU（原为 x86_64+AVX2），
+# 在 ARM(aarch64) 上编译或交叉编译时会引入不可移植的指令选择。
+# 需要显式优化时，用命令行 `RUSTFLAGS="-C target-cpu=<型号>"` 或 target-feature 白名单覆盖。

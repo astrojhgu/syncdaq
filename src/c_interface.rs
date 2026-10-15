@@ -17,6 +17,7 @@ use std::{
     slice::{from_raw_parts, from_raw_parts_mut},
 };
 
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn convert_i16_to_f32_simd(src: *const i16, dst: *mut f32, n: usize) {
     use std::arch::x86_64::*;
@@ -45,6 +46,14 @@ unsafe fn convert_i16_to_f32_simd(src: *const i16, dst: *mut f32, n: usize) {
     while i < n {
         unsafe { *dst.add(i) = *src.add(i) as f32 };
         i += 1;
+    }
+}
+
+// 非 x86_64（如 aarch64）回退到标量循环；LLVM 在 O3 下通常会自动向量化为 NEON。
+#[cfg(not(target_arch = "x86_64"))]
+unsafe fn convert_i16_to_f32_simd(src: *const i16, dst: *mut f32, n: usize) {
+    for i in 0..n {
+        unsafe { *dst.add(i) = *src.add(i) as f32 };
     }
 }
 //use sdaa_ctrl::ctrl_msg::{CtrlMsg, bcast_cmd, send_cmd};
