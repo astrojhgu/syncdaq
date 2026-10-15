@@ -5,7 +5,7 @@ use lockfree_object_pool::LinearOwnedReusable;
 use num::Complex;
 
 use crate::{
-    ctrl_msg::{send_cmd, CtrlMsg, Health},
+    ctrl_msg::{send_cmd, CtrlMsg},
     default_cfg::DEFAULT_CTRL_PORT,
     device_discovery::get_device_info,
     payload::{Payload, n_pt_per_frame},
@@ -301,16 +301,7 @@ pub extern "C" fn get_device_smp_rate(ip_u32: u32, local_ctrl_port: u16) -> u32 
         0,
     );
     for (_addr, msg) in &summary.normal_reply {
-        if let CtrlMsg::QueryReply {
-            msg_id: _,
-            fm_ver: _,
-            tick_cnt1: _,
-            tick_cnt2: _,
-            trans_state: _,
-            locked: _,
-            health: Health::T510Health { smp_rate, .. },
-        } = msg
-        {
+        if let CtrlMsg::QueryReply { smp_rate, .. } = msg {
             return *smp_rate;
         }
     }

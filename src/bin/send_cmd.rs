@@ -69,13 +69,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         for (_a, msg) in &summary.normal_reply {
             if let ctrl_msg::CtrlMsg::QueryReply {
-                msg_id: _,
-                fm_ver: _,
                 tick_cnt1,
                 tick_cnt2,
-                trans_state: _,
                 locked,
-                health: _,
+                ..
             } = msg.clone()
             {
                 println!("{}", tick_cnt2 - tick_cnt1);

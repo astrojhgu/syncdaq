@@ -55,88 +55,19 @@ impl Display for XGbeCfg {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
-#[binrw]
-#[brw(little)]
-pub enum Health {
-    #[brw(magic(0x00_00_01_fe_u32))]
-    T510Health {
-        rfdc_restart_cnt: u32,
-        //fifo_full_cnt: u32,
-        temperature: f32,
-        nports: u32,
-        fifo_full_cnt: u32,
-        over_voltage_state: u32,
-        over_range_state: u32,
-        smp_rate: u32,
-        smp_bits: u32,
-        iq_mode: u32,
-        fan_pulse_cnt: u32,
-        #[br(count=nports)]
-        pkt_cnt1: Vec<u64>,
-        #[br(count=nports)]
-        axi_frame_cnt1: Vec<u64>,
-        #[br(count=nports)]
-        pkt_cnt2: Vec<u64>,
-        #[br(count=nports)]
-        axi_frame_cnt2: Vec<u64>,
-    },
-}
-
-impl Display for Health {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            &Health::T510Health {
-                rfdc_restart_cnt,
-                temperature,
-                nports,
-                fifo_full_cnt,
-                over_voltage_state,
-                over_range_state,
-                smp_rate,
-                smp_bits,
-                iq_mode,
-                fan_pulse_cnt,
-                ref pkt_cnt1,
-                ref axi_frame_cnt1,
-                ref pkt_cnt2,
-                ref axi_frame_cnt2,
-            } => {
-                writeln!(f, "T510Health{{")?;
-                writeln!(f, "rfdc_restart_cnt: {}, ", rfdc_restart_cnt)?;
-                writeln!(f, "temperature: {} degC, ", temperature)?;
-                writeln!(f, "fan pulse cnt: {fan_pulse_cnt}")?;
-                writeln!(f, "nports: {}, ", nports)?;
-                writeln!(f, "smp_rate: {} MSps, ", smp_rate)?;
-                writeln!(f, "smp_bits: {}, ", smp_bits)?;
-                writeln!(f, "fmt: {}, ", if iq_mode == 1 { "IQ" } else { "real" })?;
-                writeln!(f, "fifo_full_cnt: {}, ", fifo_full_cnt >> 16)?;
-                writeln!(f, "fifo_len: {}, ", fifo_full_cnt & 0xffff)?;
-                writeln!(f, "over voltage state: {:x}", over_voltage_state)?;
-                writeln!(f, "over range state: {:x}", over_range_state)?;
-                write!(f, "pkt_cnt1: \t\t[")?;
-                for x in pkt_cnt1 {
-                    write!(f, "{}, ", x)?;
-                }
-                writeln!(f, "], ")?;
-                write!(f, "axi_frame_cnt1: \t[")?;
-                for x in axi_frame_cnt1 {
-                    write!(f, "{}, ", x)?;
-                }
-                writeln!(f, "], ")?;
-                write!(f, "pkt_cnt2: \t\t[")?;
-                for x in pkt_cnt2 {
-                    write!(f, "{}, ", x)?;
-                }
-                writeln!(f, "], ")?;
-                write!(f, "axi_frame_cnt2: \t[")?;
-                for x in axi_frame_cnt2 {
-                    write!(f, "{}, ", x)?;
-                }
-                writeln!(f, "]")?;
-            }
-        }
-        writeln!(f, "}}")
+fn boot_mode_name(m: u32) -> &'static str {
+    match m & 0xF {
+        0 => "JTAG",
+        1 => "QSPI24",
+        2 => "QSPI32",
+        3 => "SD0(1.8V)",
+        4 => "NAND",
+        5 => "SD1",
+        6 => "MMC",
+        7 => "USB",
+        8 => "EMMC",
+        14 => "SD0(3.0V)",
+        _ => "?",
     }
 }
 
@@ -162,7 +93,27 @@ pub enum CtrlMsg {
         tick_cnt2: u32,
         trans_state: u32,
         locked: u32,
-        health: Health,
+        _z: u32,               /* 占位：原 Health magic 0x1fe，将来复用 */
+        rfdc_restart_cnt: u32,
+        temperature: f32,
+        nports: u32,
+        boot_mode: u32,
+        uptime_s: u32,
+        fifo_full_cnt: u32,
+        over_voltage_state: u32,
+        over_range_state: u32,
+        smp_rate: u32,
+        smp_bits: u32,
+        iq_mode: u32,
+        fan_pulse_cnt: u32,
+        #[br(count=nports)]
+        pkt_cnt1: Vec<u64>,
+        #[br(count=nports)]
+        axi_frame_cnt1: Vec<u64>,
+        #[br(count=nports)]
+        pkt_cnt2: Vec<u64>,
+        #[br(count=nports)]
+        axi_frame_cnt2: Vec<u64>,
     },
     #[brw(magic(0x02_u32))]
     Sync { msg_id: u32 },
@@ -449,7 +400,23 @@ impl Display for CtrlMsg {
                 tick_cnt2,
                 trans_state,
                 locked,
-                health,
+                _z,
+                rfdc_restart_cnt,
+                temperature,
+                nports,
+                boot_mode,
+                uptime_s,
+                fifo_full_cnt,
+                over_voltage_state,
+                over_range_state,
+                smp_rate,
+                smp_bits,
+                iq_mode,
+                fan_pulse_cnt,
+                pkt_cnt1,
+                axi_frame_cnt1,
+                pkt_cnt2,
+                axi_frame_cnt2,
             } => {
                 let day: u32 = (fm_ver >> 27) & 0x1F;
                 let month: u32 = (fm_ver >> 23) & 0x0F;
@@ -458,17 +425,47 @@ impl Display for CtrlMsg {
                 let minute: u32 = (fm_ver >> 6) & 0x3F;
                 let second: u32 = fm_ver & 0x3F;
 
-                write!(
-                    f,
-                    "QueryReply{{
-                    msg_id: {msg_id},
-                    fm_ver: 0x{fm_ver:x} ({year}-{month:02}-{day:02} {hour}:{minute}:{second:02}),
-                    tick_cnt1: {tick_cnt1},
-                    tick_cnt2: {tick_cnt2},
-                    trans_state: 0x{trans_state:x},
-                    locked: 0x{locked:x},
-                    Health: {health}"
-                )?;
+                writeln!(f, "QueryReply{{")?;
+                writeln!(f, "  msg_id: {msg_id}")?;
+                writeln!(f, "  fm_ver: 0x{fm_ver:x} ({year}-{month:02}-{day:02} {hour}:{minute}:{second:02})")?;
+                writeln!(f, "  tick_cnt1: {tick_cnt1}")?;
+                writeln!(f, "  tick_cnt2: {tick_cnt2}")?;
+                writeln!(f, "  trans_state: 0x{trans_state:x}")?;
+                writeln!(f, "  locked: 0x{locked:x}")?;
+                writeln!(f, "  _z: 0x{_z:x}")?;
+                writeln!(f, "  rfdc_restart_cnt: {rfdc_restart_cnt}")?;
+                writeln!(f, "  temperature: {temperature} degC")?;
+                writeln!(f, "  fan_pulse_cnt: {fan_pulse_cnt}")?;
+                writeln!(f, "  nports: {nports}")?;
+                writeln!(f, "  boot_mode: {boot_mode} ({})", boot_mode_name(*boot_mode))?;
+                writeln!(f, "  uptime_s: {uptime_s} s")?;
+                writeln!(f, "  smp_rate: {smp_rate} MSps")?;
+                writeln!(f, "  smp_bits: {smp_bits}")?;
+                writeln!(f, "  fmt: {}", if *iq_mode == 1 { "IQ" } else { "real" })?;
+                writeln!(f, "  fifo_full_cnt: {}", fifo_full_cnt >> 16)?;
+                writeln!(f, "  fifo_len: {}", fifo_full_cnt & 0xffff)?;
+                writeln!(f, "  over_voltage_state: 0x{over_voltage_state:x}")?;
+                writeln!(f, "  over_range_state: 0x{over_range_state:x}")?;
+                write!(f, "  pkt_cnt1: [")?;
+                for x in pkt_cnt1 {
+                    write!(f, "{x}, ")?;
+                }
+                writeln!(f, "]")?;
+                write!(f, "  axi_frame_cnt1: [")?;
+                for x in axi_frame_cnt1 {
+                    write!(f, "{x}, ")?;
+                }
+                writeln!(f, "]")?;
+                write!(f, "  pkt_cnt2: [")?;
+                for x in pkt_cnt2 {
+                    write!(f, "{x}, ")?;
+                }
+                writeln!(f, "]")?;
+                write!(f, "  axi_frame_cnt2: [")?;
+                for x in axi_frame_cnt2 {
+                    write!(f, "{x}, ")?;
+                }
+                writeln!(f, "]")?;
                 writeln!(f, "}}")?;
                 if *locked & 0x00_00_00_0f != 0x0f {
                     writeln!(f, "Lock stat abnormal!")?;
@@ -1101,18 +1098,15 @@ impl CtrlMsg {
 /// 校验 QueryReply 的线上长度（20260913 加入，配合 smp_bits/iq_mode）。
 /// C 端 udp_server.h 的 QueryReply 一旦出现隐式填充、字段增删或顺序变化，
 /// 这里会立刻报出来，避免 host 静默按错位解析。
-/// 期望长度 = 72B 前缀 + 4 个 u64 数组 × nports。
+/// 期望长度 = 80B 前缀 + 4 个 u64 数组 × nports。
 pub fn check_reply_layout(reply: &CtrlMsg, consumed: usize, recv_len: usize) {
-    if let CtrlMsg::QueryReply {
-        health: Health::T510Health { nports, .. },
-        ..
-    } = reply
+    if let CtrlMsg::QueryReply { nports, .. } = reply
     {
-        let expect = 72 + 32 * (*nports as usize);
+        let expect = 80 + 32 * (*nports as usize);
         if consumed != expect || recv_len != expect {
             eprintln!(
                 "⚠ QueryReply 长度异常：期望 {expect}B（nports={nports}），实收 {recv_len}B、解析消耗 {consumed}B \
-                 —— 固件与主机的 QueryReply 布局不一致（查 udp_server.h 字段/对齐 与 ctrl_msg.rs 的 Health）"
+                 —— 固件与主机的 QueryReply 布局不一致（查 udp_server.h 字段/对齐 与 ctrl_msg.rs 的 QueryReply）"
             );
         }
     }
@@ -1422,7 +1416,8 @@ mod layout_tests {
     use std::io::Cursor;
 
     /// 锁定 QueryReply 的线上布局（与 C 端 udp_server.h 一一对应）：
-    /// 总长 328B，smp_bits 在偏移 60，iq_mode 在偏移 64。
+    /// 总长 336B，boot_mode 在偏移 44，uptime_s 在偏移 48，
+    /// smp_bits 在偏移 68，iq_mode 在偏移 72。
     #[test]
     fn query_reply_wire_layout() {
         let msg = CtrlMsg::QueryReply {
@@ -1432,30 +1427,34 @@ mod layout_tests {
             tick_cnt2: 4,
             trans_state: 5,
             locked: 6,
-            health: Health::T510Health {
-                rfdc_restart_cnt: 7,
-                temperature: 40.0,
-                nports: 8,
-                fifo_full_cnt: 0,
-                over_voltage_state: 0,
-                over_range_state: 0,
-                smp_rate: 100,
-                smp_bits: 0xAABB_CCDD,
-                iq_mode: 0x1122_3344,
-                fan_pulse_cnt: 9,
-                pkt_cnt1: vec![0; 8],
-                axi_frame_cnt1: vec![0; 8],
-                pkt_cnt2: vec![0; 8],
-                axi_frame_cnt2: vec![0; 8],
-            },
+            _z: 0x1fe,
+            rfdc_restart_cnt: 7,
+            temperature: 40.0,
+            nports: 8,
+            boot_mode: 3,
+            uptime_s: 12345,
+            fifo_full_cnt: 0,
+            over_voltage_state: 0,
+            over_range_state: 0,
+            smp_rate: 100,
+            smp_bits: 0xAABB_CCDD,
+            iq_mode: 0x1122_3344,
+            fan_pulse_cnt: 9,
+            pkt_cnt1: vec![0; 8],
+            axi_frame_cnt1: vec![0; 8],
+            pkt_cnt2: vec![0; 8],
+            axi_frame_cnt2: vec![0; 8],
         };
         let mut buf = Cursor::new(Vec::new());
         msg.write(&mut buf).expect("write");
         let b = buf.into_inner();
-        assert_eq!(b.len(), 328, "QueryReply 线上长度应为 328B");
+        assert_eq!(b.len(), 336, "QueryReply 线上长度应为 336B");
         assert_eq!(&b[0..4], &0xff_00_00_01_u32.to_le_bytes(), "msg_type@0");
-        assert_eq!(&b[56..60], &100_u32.to_le_bytes(), "smp_rate@56");
-        assert_eq!(&b[60..64], &0xAABB_CCDD_u32.to_le_bytes(), "smp_bits@60");
-        assert_eq!(&b[64..68], &0x1122_3344_u32.to_le_bytes(), "iq_mode@64");
+        assert_eq!(&b[28..32], &0x1fe_u32.to_le_bytes(), "_z@28 (原 magic)");
+        assert_eq!(&b[44..48], &3_u32.to_le_bytes(), "boot_mode@44");
+        assert_eq!(&b[48..52], &12345_u32.to_le_bytes(), "uptime_s@48");
+        assert_eq!(&b[64..68], &100_u32.to_le_bytes(), "smp_rate@64");
+        assert_eq!(&b[68..72], &0xAABB_CCDD_u32.to_le_bytes(), "smp_bits@68");
+        assert_eq!(&b[72..76], &0x1122_3344_u32.to_le_bytes(), "iq_mode@72");
     }
 }
