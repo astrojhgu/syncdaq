@@ -7,7 +7,7 @@ use std::{
 };
 
 use binrw::{BinRead, BinWrite, binrw};
-use chrono::Local;
+use chrono::{Local, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
 use rand::{RngExt, rng};
@@ -71,6 +71,28 @@ fn boot_mode_name(m: u32) -> &'static str {
     }
 }
 
+/// 解码 sw 版本位域（与 PL 版本同构：day@[31:27] month@[26:23] year@[22:17]
+/// hour@[16:12] minute@[11:6] second@[5:0]，year 为 2000 偏移），
+/// 其值是编译期 UTC 时间，转成本地时间显示。
+fn sw_build_time_local(z: u32) -> String {
+    let day = (z >> 27) & 0x1F;
+    let month = (z >> 23) & 0x0F;
+    let year = 2000 + ((z >> 17) & 0x3F);
+    let hour = (z >> 12) & 0x1F;
+    let minute = (z >> 6) & 0x3F;
+    let second = z & 0x3F;
+    match Utc
+        .with_ymd_and_hms(year as i32, month, day, hour, minute, second)
+        .single()
+    {
+        Some(utc) => utc
+            .with_timezone(&Local)
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string(),
+        None => format!("0x{z:08x} (invalid)"),
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[binrw]
 #[brw(little)]
@@ -93,7 +115,7 @@ pub enum CtrlMsg {
         tick_cnt2: u32,
         trans_state: u32,
         locked: u32,
-        _z: u32,               /* 占位：原 Health magic 0x1fe，将来复用 */
+        _z: u32,               /* sw 编译时间（UTC 位域，主机打印转本地） */
         rfdc_restart_cnt: u32,
         temperature: f32,
         nports: u32,
@@ -432,7 +454,7 @@ impl Display for CtrlMsg {
                 writeln!(f, "  tick_cnt2: {tick_cnt2}")?;
                 writeln!(f, "  trans_state: 0x{trans_state:x}")?;
                 writeln!(f, "  locked: 0x{locked:x}")?;
-                writeln!(f, "  _z: 0x{_z:x}")?;
+                writeln!(f, "  sw_ver: {}", sw_build_time_local(*_z))?;
                 writeln!(f, "  rfdc_restart_cnt: {rfdc_restart_cnt}")?;
                 writeln!(f, "  temperature: {temperature} degC")?;
                 writeln!(f, "  fan_pulse_cnt: {fan_pulse_cnt}")?;
@@ -1427,7 +1449,7 @@ mod layout_tests {
             tick_cnt2: 4,
             trans_state: 5,
             locked: 6,
-            _z: 0x1fe,
+            _z: 0x6D340B4A,  /* 2026-10-13 00:45:10 UTC（位域样例） */
             rfdc_restart_cnt: 7,
             temperature: 40.0,
             nports: 8,
@@ -1450,7 +1472,7 @@ mod layout_tests {
         let b = buf.into_inner();
         assert_eq!(b.len(), 336, "QueryReply 线上长度应为 336B");
         assert_eq!(&b[0..4], &0xff_00_00_01_u32.to_le_bytes(), "msg_type@0");
-        assert_eq!(&b[28..32], &0x1fe_u32.to_le_bytes(), "_z@28 (原 magic)");
+        assert_eq!(&b[28..32], &0x6D340B4A_u32.to_le_bytes(), "_z@28 (sw 版本)");
         assert_eq!(&b[44..48], &3_u32.to_le_bytes(), "boot_mode@44");
         assert_eq!(&b[48..52], &12345_u32.to_le_bytes(), "uptime_s@48");
         assert_eq!(&b[64..68], &100_u32.to_le_bytes(), "smp_rate@64");
