@@ -1,3 +1,13 @@
 # 已移除 `-C target-cpu=native`：它把代码绑定到「编译机」的 CPU（原为 x86_64+AVX2），
 # 在 ARM(aarch64) 上编译或交叉编译时会引入不可移植的指令选择。
 # 需要显式优化时，用命令行 `RUSTFLAGS="-C target-cpu=<型号>"` 或 target-feature 白名单覆盖。
+# 注意：环境变量 RUSTFLAGS 会整体覆盖下面的 build.rustflags，覆盖时记得带上 -Znext-solver=no。
+
+# 绕开 rustc nightly 的 ICE：本 crate 用了 #![feature(generic_const_exprs)]，
+# 而 1.101.0-nightly 默认 `-Znext-solver=globally`（对泛型 const 表达式自动回退到
+# coherence 用新求解器），在 codegen 阶段求值 const 时 panic：
+#   rustc_infer/src/infer/mod.rs:1705 `internal error: entered unreachable code`
+#   调用栈落在 rustc_next_trait_solver::evaluate_const。
+# 关掉新求解器后编译通过；等上游修复后可删除这一行。
+[build]
+rustflags = ["-Znext-solver=no"]
