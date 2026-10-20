@@ -1,0 +1,49 @@
+# SyncDAQ 板卡状态转移图 —— d2 版（等价源）
+#
+# 渲染: d2 --layout tala syncdaq_state.d2 syncdaq_state.d2.svg
+# 说明: 与 gen_state_svg.py 的 NODES/EDGES 内容一致（10 状态、12 转移）。
+#       当前 manual.typ / manual.md 引用的是 gen_state_svg.py 生成的手排版图
+#       （syncdaq_state.png），d2 版供 d2 工具链单独渲染/编辑，不用于手册。
+#
+# 视角: 指令 / 状态。橙色 = 上电自动流程；蓝色 = 网络；绿色 = 指令配置；
+#       紫色 = 数据流；红色 = 关机。
+
+direction: right
+
+power_net: "① 上电与联网" {
+  direction: up
+  style: { fill: "#fffdf7"; stroke: "#d48806"; stroke-dash: 3 }
+
+  pwr_off: "关机" { shape: oval; style: { fill: "#fdecea"; stroke: "#c0392b" } }
+  boot: "开机 / 启动中\nFSBL → PL → PS" { style: { fill: "#fff4e0"; stroke: "#d48806" } }
+  mac: "MAC 已配置\n（自动：PL DNA → MAC）" { style: { fill: "#fff4e0"; stroke: "#d48806" } }
+  dhcp: "等待 DHCP\n（自动）" { style: { fill: "#eaf3fb"; stroke: "#1a4f8a" } }
+  online: "在线\nUDP :3000" { style: { fill: "#eaf3fb"; stroke: "#1a4f8a" } }
+}
+
+sync_stream: "② 同步与数据流" {
+  direction: down
+  style: { fill: "#f7fdf8"; stroke: "#2e7d32"; stroke-dash: 3 }
+
+  synced: "已同步\nMTS" { style: { fill: "#e8f5e9"; stroke: "#2e7d32" } }
+  lo: "本振已设" { style: { fill: "#e8f5e9"; stroke: "#2e7d32" } }
+  xgbe: "100G 已配置\n8 端口 MAC / IP / 端口" { style: { fill: "#e8f5e9"; stroke: "#2e7d32" } }
+  ready: "就绪\n（SetDSA 已设）" { shape: oval; style: { fill: "#e8f5e9"; stroke: "#2e7d32" } }
+  tx: "数据传输中" { shape: oval; style: { fill: "#f3e8fd"; stroke: "#6a1b9a" } }
+}
+
+power_net.pwr_off -> power_net.boot: "上电"
+power_net.boot -> power_net.mac: "自动"
+power_net.mac -> power_net.dhcp: "自动"
+power_net.dhcp -> power_net.online: "拿到 IP"
+
+power_net.online -> sync_stream.synced: "Sync.yaml"
+sync_stream.synced -> sync_stream.lo: "MixerSet.yaml"
+sync_stream.lo -> sync_stream.xgbe: "XGbeCfgSingle ×8"
+sync_stream.xgbe -> sync_stream.ready: "SetDSA.yaml"
+
+sync_stream.ready -> sync_stream.tx: "StreamStart.yaml"
+sync_stream.tx -> sync_stream.ready: "StreamStop.yaml"
+
+power_net.online -> power_net.boot: "Reboot.yaml"
+sync_stream.ready -> power_net.pwr_off: "断电"
