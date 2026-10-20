@@ -108,9 +108,36 @@ SyncDAQ 是一块**同步采集板**：8 路 I/Q ADC 经 RFDC 下变频，FPGA �
 | `Reboot` | `cmd/Reboot.yaml` | 重启（`mode`：0 软 POR，1 停喂狗，2 恢复喂狗） | 任意在线状态 |
 | `FetchFW` / `SwitchFW` | `cmd/FetchFW.yaml` | 网络升级固件；切换后需重启生效 | 在线 |
 
-## 5 标准操作流程
+## 5 指令超时时间
 
-### 5.1 开机与初始化
+`send_cmd` 的 `-t` 是**等回包的秒数**（默认 1 s）。实测方法：直接发 UDP，记从发出到收到回包的时间，每条指令 3 次（板卡 `192.168.5.164`，320 MSps 固件）。
+
+| 指令 | 实测耗时 | 建议 `-t` | 说明 |
+|---|---|---|---|
+| `Query` | 10 ms | 1 | |
+| `XGbeCfgQuery` | 26 ms | 1 | |
+| `GetDSA` | 3–7 ms | 1 | |
+| `SetDSA` | 3 ms | 1 | |
+| `QueryBitShift` | 0.3 ms | 1 | |
+| `QsfpInfo` | 407 ms | 1 | I²C 读光模块，普通指令里最慢 |
+| `StreamStart` | 11 ms | 1 | 回包快；真正生效要等下一个 PPS |
+| `StreamStop` | 11 ms | 1 | 同上 |
+| `SetClk` | 31 ms | 1 | |
+| `XGbeCfgSingle` | 未单独测 | 1 | 与 `SetDSA` 同量级 |
+| `MixerSet`（`sync=1`） | 1.4 s | 2 | 等下一个 PPS 边沿 |
+| `Sync` | 1.4 s | 2 | MTS 同样卡在 PPS 上 |
+| `Reboot` | 回包 < 100 ms | 3 | 见下 |
+| `FetchFW` / `SwitchFW` | 异步 / 数十秒 | 40 | `SwitchFW` 同步等 md5 检查 |
+
+> **口径**：普通指令 `-t 1` 足够（最慢的 `QsfpInfo` 才 0.4 s）；只有 **`MixerSet`（`sync=1`）和 `Sync` 实测约 1.4 s**，给 `-t 2` 留余量。
+
+> **`Reboot` 的坑**：`Reboot` 的回包本身很快，但板卡收到后会立即复位，所以 `-t` 给 **3** 就够（等的是回包，不是启动）。两个前提：
+> ① 板卡必须是 **SD / eMMC 启动**——JTAG 启动模式下软 POR 不生效，发 `Reboot` 后板卡直接失联，只能重新烧录或断电恢复；
+> ② 回包不代表重启完成，板卡重新上线还要几十秒（未实测，待补）。
+
+## 6 标准操作流程
+
+### 6.1 开机与初始化
 
 ```bash
 cd ~/src/syncdaq
@@ -120,7 +147,7 @@ cd ~/src/syncdaq
 
 `init_rfsoc.yaml` 一条命令完成整套初始化；`Sync` 开机一次就够，不要每轮都发。上电后如果不设 `SetDSA`，片上衰减器会停在默认大衰减态，而 `GetDSA` 仍回读 0。
 
-### 5.2 采集
+### 6.2 采集
 
 ```text
 1. StreamStop（确保在停止状态）
@@ -132,18 +159,18 @@ cd ~/src/syncdaq
 
 > **必须**：接收程序要在 `StreamStart` **之前**就绪，否则抓不到第 0 帧，会抓到流中间的包（对比无效）。
 
-### 5.3 停止
+### 6.3 停止
 
 ```bash
 ./send_cmd.sh -a 192.168.5.174:3000 -c cmd/StreamStop.yaml -d 1 -t 2
 sleep 2   # 等 PPS 生效，再数包
 ```
 
-### 5.4 关机
+### 6.4 关机
 
 直接断电。重新上电后从「开机 / 启动中」重新走一遍。
 
-## 6 故障排除
+## 7 故障排除
 
 | 现象 | 常见原因 | 处理 |
 |---|---|---|
@@ -160,7 +187,7 @@ sudo sysctl -w net.ipv4.conf.all.rp_filter=0
 sudo sysctl -w net.ipv4.conf.default.rp_filter=0
 ```
 
-## 7 附录：关键路径
+## 8 附录：关键路径
 
 | 项 | 路径 |
 |---|---|
