@@ -46,7 +46,7 @@ SyncDAQ 是一块**同步采集板**：8 路 I/Q ADC 经 RFDC 下变频，FPGA �
 
 从开机到出数据是一条单向链：**上电 → 自动联网 →（主机指令）同步 / 本振 / 100G 装订 / DSA → 开始传输**。`StreamStop` 只回到「就绪」，不回到「离线」。
 
-![板卡状态转移图](syncdaq_state.png)
+![板卡状态转移图](syncdaq_state.svg)
 
 ### 3.1 状态
 

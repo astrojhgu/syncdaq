@@ -133,7 +133,7 @@ SyncDAQ 是一块*同步采集板*：8 路 I/Q ADC 经 RFDC 下变频，FPGA 侧
 `StreamStop` 只回到「就绪」，不回到「离线」。
 
 #figure(
-  image("syncdaq_state.png", width: 100%),
+  image("syncdaq_state.svg", width: 100%),
   caption: [板卡状态转移图（指令 / 状态视角）],
 )
 
