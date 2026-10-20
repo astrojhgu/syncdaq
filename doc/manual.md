@@ -77,7 +77,7 @@ SyncDAQ 是一块**同步采集板**：8 路 I/Q ADC 经 RFDC 下变频，FPGA �
 | 100G 已配置 | 就绪 | `SetDSA.yaml` | 上电后必须做 |
 | 就绪 | 数据传输中 | `StreamStart.yaml` | PPS 对齐，0~1 s 生效；帧计数清零 |
 | 数据传输中 | 就绪 | `StreamStop.yaml` | PPS 对齐，等 `transmitting=0` |
-| 在线 | 开机 | `Reboot.yaml` | 软 POR / 看门狗 |
+| 任意在线状态 | 开机 | `Reboot.yaml` | 软 POR / 看门狗；任意在线状态均可发 |
 | 就绪 | 关机 | 断电 | 直接断电 |
 
 > **三个时序坑**
@@ -105,7 +105,7 @@ SyncDAQ 是一块**同步采集板**：8 路 I/Q ADC 经 RFDC 下变频，FPGA �
 | `StreamStart` | `cmd/StreamStart.yaml` | 开始数据传输（PPS 对齐） | 就绪 |
 | `StreamStop` | `cmd/StreamStop.yaml` | 停止数据传输（PPS 对齐） | 传输中 |
 | `QueryBitShift` | `cmd/QueryBitShift.yaml` | 查 8bit 固件每通道取哪 8 位 | 在线 |
-| `Reboot` | `cmd/Reboot.yaml` | 重启（`mode`：0 软 POR，1 停喂狗，2 恢复喂狗） | 在线 |
+| `Reboot` | `cmd/Reboot.yaml` | 重启（`mode`：0 软 POR，1 停喂狗，2 恢复喂狗） | 任意在线状态 |
 | `FetchFW` / `SwitchFW` | `cmd/FetchFW.yaml` | 网络升级固件；切换后需重启生效 | 在线 |
 
 ## 5 标准操作流程

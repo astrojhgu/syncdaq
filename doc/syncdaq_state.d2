@@ -45,5 +45,5 @@ sync_stream.xgbe -> sync_stream.ready: "SetDSA.yaml"
 sync_stream.ready -> sync_stream.tx: "StreamStart.yaml"
 sync_stream.tx -> sync_stream.ready: "StreamStop.yaml"
 
-power_net.online -> power_net.boot: "Reboot.yaml"
+power_net.online -> power_net.boot: "Reboot.yaml（任意状态）"
 sync_stream.ready -> power_net.pwr_off: "断电"
