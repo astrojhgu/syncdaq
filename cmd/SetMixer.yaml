@@ -1,4 +1,4 @@
-- !MixerSet
+- !SetMixer
   msg_id: 0
   nports: 8
   freq: [257, 257, 257, 257, 257, 257, 257, 257]

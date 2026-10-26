@@ -43,7 +43,7 @@ EDGES = [
     ("mac", "dhcp", "自动", [], None),
     ("dhcp", "online", "拿到 IP", [], None),
     ("online", "synced", "Sync.yaml", [], None),
-    ("synced", "lo", "MixerSet.yaml", [], None),
+    ("synced", "lo", "SetMixer.yaml", [], None),
     ("lo", "xgbe", "XGbeCfgSingle ×8", [], None),
     ("xgbe", "ready", "SetDSA.yaml", [], None),
     # 竖直线对：左侧向下 StreamStart，右侧向上 StreamStop

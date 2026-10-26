@@ -263,7 +263,7 @@ pub enum CtrlMsg {
     #[brw(magic(0xff_00_00_0c_u32))]
     SetClkReply { msg_id: u32, clk_state: u32 },
     #[brw(magic(0x00_00_00_0d_u32))]
-    MixerSet {
+    SetMixer {
         msg_id: u32,
         nports: u32,
         sync: u32,
@@ -273,7 +273,27 @@ pub enum CtrlMsg {
         phase: Vec<f64>,
     },
     #[brw(magic(0xff_00_00_0d_u32))]
-    MixerSetReply { msg_id: u32 },
+    SetMixerReply { msg_id: u32 },
+    /// 读回板卡 RFDC 内部当前生效的本振值。固件每次都用 `XRFdc_GetMixerSettings()`
+    /// 现读（不缓存），所以 MTS 重排相位、或别处改动 NCO 之后，返回的是硬件真实值
+    /// —— 上电未设过时是 IP 的默认 NCO，不是 0。
+    /// 板卡按 `NPORTS` 个通道回包（与 `SetMixer` 请求的数组长度对称）。
+    #[brw(magic(0x00_00_00_10_u32))]
+    GetMixer { msg_id: u32 },
+    #[brw(magic(0xff_00_00_10_u32))]
+    GetMixerReply {
+        msg_id: u32,
+        /// `nports` 之后有 4 字节保留位：C 端 `struct GetMixerReply` 里
+        /// `double` 要求 8 字节对齐，编译器会在 12 处插 4 字节 padding，
+        /// sizeof 是 144 而不是 140。固件把该填充显式写成 `u32_t _pad`，
+        /// 这里用 pad_after 对齐，别把 `12` 当数组起点。
+        #[brw(pad_after(4))]
+        nports: u32,
+        #[br(count=nports)]
+        freq: Vec<f64>,
+        #[br(count=nports)]
+        phase: Vec<f64>,
+    },
     #[brw(magic(0x00_00_00_0e_u32))]
     GetDSA { msg_id: u32, port_id: u32 },
     #[brw(magic(0xff_00_00_0e_u32))]
@@ -723,7 +743,7 @@ impl Display for CtrlMsg {
                     "SetClkReply {{msg_id: {msg_id}, clk_state: {clk_state}}}"
                 )
             }
-            CtrlMsg::MixerSet {
+            CtrlMsg::SetMixer {
                 msg_id,
                 nports: _,
                 freq,
@@ -732,11 +752,35 @@ impl Display for CtrlMsg {
             } => {
                 writeln!(
                     f,
-                    "MixerSet {{msg_id: {msg_id}, freq: {freq:?}, phase:{phase:?}, sync:{sync} }}"
+                    "SetMixer {{msg_id: {msg_id}, freq: {freq:?}, phase:{phase:?}, sync:{sync} }}"
                 )
             }
-            CtrlMsg::MixerSetReply { msg_id } => {
-                writeln!(f, "MixerSetReply {{msg_id: {msg_id}}}")
+            CtrlMsg::SetMixerReply { msg_id } => {
+                writeln!(f, "SetMixerReply {{msg_id: {msg_id}}}")
+            }
+            CtrlMsg::GetMixer { msg_id } => {
+                writeln!(f, "GetMixer {{msg_id: {msg_id}}}")
+            }
+            CtrlMsg::GetMixerReply {
+                msg_id,
+                nports,
+                freq,
+                phase,
+            } => {
+                write!(
+                    f,
+                    "GetMixerReply {{msg_id: {msg_id}, nports: {nports}, freq: ["
+                )?;
+                // 回读值来自 NCO 频率字的反算，带 ~1e-11 MHz 的浮点尾数；
+                // 按 1 Hz 显示（6 位小数）就够，别把 100.49999999999727 摆出来。
+                for x in freq {
+                    write!(f, "{x:.6}, ")?;
+                }
+                write!(f, "], phase: [")?;
+                for x in phase {
+                    write!(f, "{x:.6}, ")?;
+                }
+                writeln!(f, "]}}")
             }
             CtrlMsg::GetDSA { msg_id, port_id } => {
                 writeln!(f, "GetDSA {{msg_id:{msg_id}, port_id: {port_id} }}")
@@ -1028,8 +1072,10 @@ impl CtrlMsg {
             XGbeCfgSingleReply { msg_id } => *msg_id = mid,
             SetClk { msg_id, .. } => *msg_id = mid,
             SetClkReply { msg_id, .. } => *msg_id = mid,
-            MixerSet { msg_id, .. } => *msg_id = mid,
-            MixerSetReply { msg_id } => *msg_id = mid,
+            SetMixer { msg_id, .. } => *msg_id = mid,
+            SetMixerReply { msg_id } => *msg_id = mid,
+            GetMixer { msg_id } => *msg_id = mid,
+            GetMixerReply { msg_id, .. } => *msg_id = mid,
             GetDSA { msg_id, .. } => *msg_id = mid,
             GetDSAReply { msg_id, .. } => *msg_id = mid,
             SetDSA { msg_id, .. } => *msg_id = mid,
@@ -1095,8 +1141,10 @@ impl CtrlMsg {
             XGbeCfgSingleReply { msg_id } => *msg_id,
             SetClk { msg_id, .. } => *msg_id,
             SetClkReply { msg_id, .. } => *msg_id,
-            MixerSet { msg_id, .. } => *msg_id,
-            MixerSetReply { msg_id } => *msg_id,
+            SetMixer { msg_id, .. } => *msg_id,
+            SetMixerReply { msg_id } => *msg_id,
+            GetMixer { msg_id } => *msg_id,
+            GetMixerReply { msg_id, .. } => *msg_id,
             GetDSA { msg_id, .. } => *msg_id,
             GetDSAReply { msg_id, .. } => *msg_id,
             SetDSA { msg_id, .. } => *msg_id,
@@ -1117,10 +1165,12 @@ impl CtrlMsg {
     }
 }
 
-/// 校验 QueryReply 的线上长度（20260913 加入，配合 smp_bits/iq_mode）。
-/// C 端 udp_server.h 的 QueryReply 一旦出现隐式填充、字段增删或顺序变化，
+/// 校验定长 / 变长 reply 的线上长度（QueryReply 20260913 加入，配合 smp_bits/iq_mode；
+/// GetMixerReply 随 GetMixer 一起加入）。
+/// C 端 udp_server.h 的对应结构体一旦出现隐式填充、字段增删或顺序变化，
 /// 这里会立刻报出来，避免 host 静默按错位解析。
-/// 期望长度 = 80B 前缀 + 4 个 u64 数组 × nports。
+/// QueryReply 期望长度 = 80B 前缀 + 4 个 u64 数组 × nports；
+/// GetMixerReply 期望长度 = 16B 前缀（含 nports 后的 4B 对齐保留位）+ 2 个 f64 数组 × nports。
 pub fn check_reply_layout(reply: &CtrlMsg, consumed: usize, recv_len: usize) {
     if let CtrlMsg::QueryReply { nports, .. } = reply
     {
@@ -1129,6 +1179,16 @@ pub fn check_reply_layout(reply: &CtrlMsg, consumed: usize, recv_len: usize) {
             eprintln!(
                 "⚠ QueryReply 长度异常：期望 {expect}B（nports={nports}），实收 {recv_len}B、解析消耗 {consumed}B \
                  —— 固件与主机的 QueryReply 布局不一致（查 udp_server.h 字段/对齐 与 ctrl_msg.rs 的 QueryReply）"
+            );
+        }
+    }
+    if let CtrlMsg::GetMixerReply { nports, .. } = reply
+    {
+        let expect = 16 + 16 * (*nports as usize);
+        if consumed != expect || recv_len != expect {
+            eprintln!(
+                "⚠ GetMixerReply 长度异常：期望 {expect}B（nports={nports}），实收 {recv_len}B、解析消耗 {consumed}B \
+                 —— 固件与主机的 GetMixerReply 布局不一致（查 udp_server.h 的 nports/freq/phase 与 ctrl_msg.rs 的 GetMixerReply）"
             );
         }
     }
@@ -1478,5 +1538,60 @@ mod layout_tests {
         assert_eq!(&b[64..68], &100_u32.to_le_bytes(), "smp_rate@64");
         assert_eq!(&b[68..72], &0xAABB_CCDD_u32.to_le_bytes(), "smp_bits@68");
         assert_eq!(&b[72..76], &0x1122_3344_u32.to_le_bytes(), "iq_mode@72");
+    }
+
+    /// 锁定 SetMixer 的线上布局（与 C 端 udp_server.h 的 `struct SetMixer` 一一对应）：
+    /// 总长 16 + 16×NPORTS = 144B（NPORTS=8），freq 起于偏移 16，phase 起于偏移 80。
+    #[test]
+    fn set_mixer_wire_layout() {
+        let msg = CtrlMsg::SetMixer {
+            msg_id: 0x1234,
+            nports: 8,
+            sync: 1,
+            freq: vec![257.0; 8],
+            phase: vec![0.0; 8],
+        };
+        let mut buf = Cursor::new(Vec::new());
+        msg.write(&mut buf).expect("write");
+        let b = buf.into_inner();
+        assert_eq!(b.len(), 144, "SetMixer 线上长度应为 144B");
+        assert_eq!(&b[0..4], &0x00_00_00_0d_u32.to_le_bytes(), "msg_type@0");
+        assert_eq!(&b[4..8], &0x1234_u32.to_le_bytes(), "msg_id@4");
+        assert_eq!(&b[8..12], &8_u32.to_le_bytes(), "nports@8");
+        assert_eq!(&b[12..16], &1_u32.to_le_bytes(), "sync@12");
+        assert_eq!(&b[16..24], &257.0_f64.to_le_bytes(), "freq[0]@16");
+        assert_eq!(&b[80..88], &0.0_f64.to_le_bytes(), "phase[0]@80");
+    }
+
+    /// 锁定 GetMixer / GetMixerReply 的线上布局（与 C 端 udp_server.h 的
+    /// `struct GetMixer` / `struct GetMixerReply` 一一对应）：
+    /// 请求 8B；回复 16 + 16×NPORTS = 144B（NPORTS=8），freq 起于偏移 16，phase 起于偏移 80。
+    /// 16 而不是 12：`nports` 后有 4 字节保留位（double 的 8 字节对齐），
+    /// C 端是显式的 `u32_t _pad`，两边必须一致。
+    #[test]
+    fn get_mixer_wire_layout() {
+        let req = CtrlMsg::GetMixer { msg_id: 7 };
+        let mut buf = Cursor::new(Vec::new());
+        req.write(&mut buf).expect("write");
+        let b = buf.into_inner();
+        assert_eq!(b.len(), 8, "GetMixer 线上长度应为 8B");
+        assert_eq!(&b[0..4], &0x00_00_00_10_u32.to_le_bytes(), "msg_type@0");
+
+        let reply = CtrlMsg::GetMixerReply {
+            msg_id: 7,
+            nports: 8,
+            freq: vec![257.0; 8],
+            phase: vec![1.5; 8],
+        };
+        let mut buf = Cursor::new(Vec::new());
+        reply.write(&mut buf).expect("write");
+        let b = buf.into_inner();
+        assert_eq!(b.len(), 144, "GetMixerReply 线上长度应为 144B");
+        assert_eq!(&b[0..4], &0xff_00_00_10_u32.to_le_bytes(), "msg_type@0");
+        assert_eq!(&b[4..8], &7_u32.to_le_bytes(), "msg_id@4");
+        assert_eq!(&b[8..12], &8_u32.to_le_bytes(), "nports@8");
+        assert_eq!(&b[12..16], &0_u32.to_le_bytes(), "_pad@12 必须是 0");
+        assert_eq!(&b[16..24], &257.0_f64.to_le_bytes(), "freq[0]@16");
+        assert_eq!(&b[80..88], &1.5_f64.to_le_bytes(), "phase[0]@80");
     }
 }

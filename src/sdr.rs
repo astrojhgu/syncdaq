@@ -63,7 +63,7 @@ impl SdrCtrl {
 
     pub fn set_mixer_freq(&self, freq_mega_hz: f64, sync: u32) -> CmdReplySummary {
         if freq_mega_hz > -2000.0 && freq_mega_hz < 2000.0 {
-            let cmd = CtrlMsg::MixerSet {
+            let cmd = CtrlMsg::SetMixer {
                 msg_id: 0,
                 nports: 8,
                 // 本振频率一律送**正值**：-Q 由 FPGA 侧的 reset_mixer()
@@ -79,6 +79,14 @@ impl SdrCtrl {
         } else {
             panic!()
         }
+    }
+
+    /// 读回板卡当前的本振设定值（每通道 freq/phase）。回包由 `send_cmd` 打印；
+    /// 需要取数值的调用方从 `CmdReplySummary::normal_reply` 里匹配
+    /// `CtrlMsg::GetMixerReply`。
+    pub fn get_mixer(&self) -> CmdReplySummary {
+        let cmd = CtrlMsg::GetMixer { msg_id: 0 };
+        self.send_cmd(cmd)
     }
 
     pub fn stream_start(&self) -> CmdReplySummary {

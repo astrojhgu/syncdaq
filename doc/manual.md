@@ -58,7 +58,7 @@ SyncDAQ 是一块**同步采集板**：8 路 I/Q ADC 经 RFDC 下变频，FPGA �
 | 等待 DHCP | 自动 | 无地址时 UDP 服务不建 socket |
 | 在线 | 拿到 IP | UDP :3000 可收指令、可 `Query`（328 B 回包） |
 | 已同步 | `Sync.yaml` | RFDC MTS 完成（前置 `SetClk` 选时钟/PPS 源） |
-| 本振已设 | `MixerSet.yaml` | 各通道 LO 频率/相位 |
+| 本振已设 | `SetMixer.yaml` | 各通道 LO 频率/相位 |
 | 100G 已配置 | `XGbeCfgSingle` ×8 | 8 个端口的源/目的 MAC、IP、UDP 端口 |
 | 就绪 | `SetDSA.yaml` | 可开流；上电后必须显式 `SetDSA`（默认大衰减，`GetDSA` 假回读 0） |
 | 数据传输中 | `StreamStart.yaml` | PL `transmitting=1`，8 路 UDP 上行 |
@@ -72,7 +72,7 @@ SyncDAQ 是一块**同步采集板**：8 路 I/Q ADC 经 RFDC 下变频，FPGA �
 | MAC 已配置 | 等待 DHCP | 自动 | `dhcp_start()` |
 | 等待 DHCP | 在线 | 拿到 IP | 地址非 0 → UDP 服务建 socket |
 | 在线 | 已同步 | `Sync.yaml` | MTS；内部先 `stop_stream()` |
-| 已同步 | 本振已设 | `MixerSet.yaml` | `sync=1` 时等 PPS 边沿 |
+| 已同步 | 本振已设 | `SetMixer.yaml` | `sync=1` 时等 PPS 边沿 |
 | 本振已设 | 100G 已配置 | `XGbeCfgSingle` ×8 | 逐口装订 |
 | 100G 已配置 | 就绪 | `SetDSA.yaml` | 上电后必须做 |
 | 就绪 | 数据传输中 | `StreamStart.yaml` | PPS 对齐，0~1 s 生效；帧计数清零 |
@@ -99,7 +99,8 @@ SyncDAQ 是一块**同步采集板**：8 路 I/Q ADC 经 RFDC 下变频，FPGA �
 | `XGbeCfgQuery` | `cmd/XGbeCfgQuery.yaml` | 读 8 个 100G 端口的装订结果 | 在线 |
 | `SetClk` | `cmd/gps.yaml` / `cmd/ext_clk.yaml` | 时钟 / PPS 源（`clk_src`：1=GPS，2=外部 10 MHz） | 在线 |
 | `Sync` | `cmd/Sync.yaml` | RFDC MTS 同步，开机做一次 | 停流 |
-| `MixerSet` | `cmd/MixerSet.yaml` | 设本振（`sync=1` 等 PPS 边沿） | 在线 |
+| `SetMixer` | `cmd/SetMixer.yaml` | 设本振（`sync=1` 等 PPS 边沿） | 在线 |
+| `GetMixer` | `cmd/GetMixer.yaml` | 读回 RFDC 内部当前本振（`NPORTS` 个通道的 freq/phase）。固件每次都用 `XRFdc_GetMixerSettings()` 现读，**不缓存**，所以 MTS 重排相位/别处改过 NCO 后反映的是硬件真实值；上电未设过时是 IP 默认 NCO（320 工程实测 `-160.000000`，即 PL 里 `ADC_NCO_Freq=0.16 GHz` 取负） | 在线 |
 | `XGbeCfgSingle` | `cmd/XGbeCfgSingle.yaml` | 逐口装订 100G 源/目的 MAC、IP、端口 | 停流 |
 | `SetDSA` | `cmd/SetDSA.yaml` | 设片上衰减；上电后必做 | 在线 |
 | `StreamStart` | `cmd/StreamStart.yaml` | 开始数据传输（PPS 对齐） | 就绪 |
@@ -124,12 +125,13 @@ SyncDAQ 是一块**同步采集板**：8 路 I/Q ADC 经 RFDC 下变频，FPGA �
 | `StreamStop` | 11 ms | 1 | 同上 |
 | `SetClk` | 31 ms | 1 | |
 | `XGbeCfgSingle` | 未单独测 | 1 | 与 `SetDSA` 同量级 |
-| `MixerSet`（`sync=1`） | 1.4 s | 2 | 等下一个 PPS 边沿 |
+| `SetMixer`（`sync=1`） | 1.4 s | 2 | 等下一个 PPS 边沿 |
+| `GetMixer` | 8 ms | 1 | 8 次 `XRFdc_GetMixerSettings()` + 回包（实测 320 固件） |
 | `Sync` | 1.4 s | 2 | MTS 同样卡在 PPS 上 |
 | `Reboot` | 回包 < 100 ms | 3 | 见下 |
 | `FetchFW` / `SwitchFW` | 异步 / 数十秒 | 40 | `SwitchFW` 同步等 md5 检查 |
 
-> **口径**：普通指令 `-t 1` 足够（最慢的 `QsfpInfo` 才 0.4 s）；只有 **`MixerSet`（`sync=1`）和 `Sync` 实测约 1.4 s**，给 `-t 2` 留余量。
+> **口径**：普通指令 `-t 1` 足够（最慢的 `QsfpInfo` 才 0.4 s）；只有 **`SetMixer`（`sync=1`）和 `Sync` 实测约 1.4 s**，给 `-t 2` 留余量。
 
 > **`Reboot` 的坑**：`Reboot` 的回包本身很快，但板卡收到后会立即复位，所以 `-t` 给 **3** 就够（等的是回包，不是启动）。两个前提：
 > ① 板卡必须是 **SD / eMMC 启动**——JTAG 启动模式下软 POR 不生效，发 `Reboot` 后板卡直接失联，只能重新烧录或断电恢复；
@@ -141,7 +143,7 @@ SyncDAQ 是一块**同步采集板**：8 路 I/Q ADC 经 RFDC 下变频，FPGA �
 
 ```bash
 cd ~/src/syncdaq
-./send_cmd.sh -a 192.168.5.174:3000 -c init_rfsoc.yaml -d 1 -t 10   # SetClk + Sync + 8×XGbeCfgSingle + MixerSet
+./send_cmd.sh -a 192.168.5.174:3000 -c init_rfsoc.yaml -d 1 -t 10   # SetClk + Sync + 8×XGbeCfgSingle + SetMixer
 ./send_cmd.sh -a 192.168.5.174:3000 -c cmd/SetDSA.yaml -d 1 -t 3     # 上电必做
 ```
 

@@ -15,7 +15,7 @@
 | `dhcp` | 等待 DHCP | net | `dhcp_start()`，无地址时 UDP 服务不建 socket | 自动 |
 | `online` | 在线 | net | 拿到 IP，UDP :3000 可收指令、可 `Query`（328 B 回包） | 拿到 IP |
 | `synced` | 已同步 | cfg | RFDC MTS 完成（前置 `SetClk` 选时钟/PPS 源） | `Sync.yaml` |
-| `lo` | 本振已设 | cfg | 各通道 LO 频率/相位 | `MixerSet.yaml` |
+| `lo` | 本振已设 | cfg | 各通道 LO 频率/相位 | `SetMixer.yaml` |
 | `xgbe` | 100G 已配置 | cfg | 8 个端口的源/目的 MAC、IP、UDP 端口 | `XGbeCfgSingle` ×8 |
 | `ready` | 就绪 | cfg | 可开流；上电后必须显式 `SetDSA`（默认大衰减，`GetDSA` 假回读 0） | `SetDSA.yaml` |
 | `tx` | 数据传输中 | stream | PL `transmitting=1`，8 路 UDP 上行 | `StreamStart.yaml`（PPS 对齐） |
@@ -29,7 +29,7 @@
 | `mac` | → | `dhcp` | 自动 | `dhcp_start()` |
 | `dhcp` | → | `online` | 拿到 IP | 地址非 0 → UDP 服务建 socket |
 | `online` | → | `synced` | `Sync.yaml` | MTS；内部先 `stop_stream()` |
-| `synced` | → | `lo` | `MixerSet.yaml` | `sync=1` 时等 PPS 边沿 |
+| `synced` | → | `lo` | `SetMixer.yaml` | `sync=1` 时等 PPS 边沿 |
 | `lo` | → | `xgbe` | `XGbeCfgSingle` ×8 | 逐口装订 |
 | `xgbe` | → | `ready` | `SetDSA.yaml` | 上电后必须做 |
 | `ready` | → | `tx` | `StreamStart.yaml` | PPS 对齐，0~1 s 生效；帧计数清零 |
@@ -65,7 +65,7 @@ transitions:
   - {from: mac,    to: dhcp,   trigger: 自动,              effect: "dhcp_start()"}
   - {from: dhcp,   to: online, trigger: 拿到 IP,           effect: "UDP 服务建 socket"}
   - {from: online, to: synced, trigger: Sync.yaml,         effect: "MTS；内部先 stop_stream()"}
-  - {from: synced, to: lo,     trigger: MixerSet.yaml,     effect: "sync=1 时等 PPS 边沿"}
+  - {from: synced, to: lo,     trigger: SetMixer.yaml,     effect: "sync=1 时等 PPS 边沿"}
   - {from: lo,     to: xgbe,   trigger: XGbeCfgSingle x8,  effect: "逐口装订"}
   - {from: xgbe,   to: ready,  trigger: SetDSA.yaml,       effect: "上电后必须做"}
   - {from: ready,  to: tx,     trigger: StreamStart.yaml,  effect: "PPS 对齐，0~1 s；帧计数清零"}
@@ -94,7 +94,7 @@ constraints:
 
 ## 待确认
 
-- `init_rfsoc.yaml` 的实际顺序是 `SetClk → Sync → XGbeCfgSingle×8 → MixerSet`；图中按"同步 → 本振 → 100G"排列。
+- `init_rfsoc.yaml` 的实际顺序是 `SetClk → Sync → XGbeCfgSingle×8 → SetMixer`；图中按"同步 → 本振 → 100G"排列。
 - `SetDSA` 在图中挂在"100G 已配置 → 就绪"边上；它其实在上电后任意时刻可做。
 
 ## 事实来源

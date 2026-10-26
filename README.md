@@ -71,9 +71,14 @@ cargo run --bin send_cmd -- -a 192.168.1.255:3000 -c <指令内容文件名> -d 
 `cargo run --bin send_cmd -- -a 192.168.1.255:3000 -c cmd1/Sync.yaml -d 1 -t 3;`
 
 ## 设置本振
-编辑`cmd1/MixerSet.yaml`，修改其中的本振频率（以MHz为单位，浮点数）、本振相位（可不改）。`sync`字段代表是否执行同步，若执行同步，则会等待下一个pps秒脉冲，使用 sysref作为事件触发，否则就不执行同步，而是使用tile 作为事件触发。
+编辑`cmd1/SetMixer.yaml`，修改其中的本振频率（以MHz为单位，浮点数）、本振相位（可不改）。`sync`字段代表是否执行同步，若执行同步，则会等待下一个pps秒脉冲，使用 sysref作为事件触发，否则就不执行同步，而是使用tile 作为事件触发。
 
-`cargo run --bin send_cmd -- -a 192.168.1.255:3000 -c cmd1/MixerSet.yaml -d 1 -t 3;`
+`cargo run --bin send_cmd -- -a 192.168.1.255:3000 -c cmd1/SetMixer.yaml -d 1 -t 3;`
+
+## 读回本振
+`cargo run --bin send_cmd -- -a 192.168.1.255:3000 -c cmd/GetMixer.yaml -d 0 -t 3;`
+
+板卡每次都调 `XRFdc_GetMixerSettings()` 现读 RFDC 内部值（不缓存），回包是 `NPORTS` 个通道的 freq/phase。上电后没设过时读到的是 IP 默认 NCO，不是 0。
 
 ## 开启数据传输
 `cargo run --bin send_cmd -- -a 192.168.1.255:3000 -c cmd1/StreamStart.yaml -d 1 -t 3;`

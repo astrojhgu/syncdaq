@@ -19,6 +19,11 @@ fn main() {
     let socket = UdpSocket::bind(args.addr).unwrap();
     socket.set_nonblocking(false).unwrap();
     let mut shifts = std::collections::BTreeMap::<u32, u32>::new();
+    // dummy 没有 RFDC 硬件可读，只能保留最后一次 SetMixer 的值来冒充「当前值」。
+    // 真板卡的 GetMixer 是每次调 XRFdc_GetMixerSettings() 现读硬件、不缓存，
+    // 所以上电未设过时真板卡回的是 IP 默认 NCO，这里回的是全 0。
+    let mut mixer_freq: Vec<f64> = vec![0.0; 8];
+    let mut mixer_phase: Vec<f64> = vec![0.0; 8];
     loop {
         let mut buf = vec![0_u8; 9000];
         let (sz, addr) = socket.recv_from(&mut buf).unwrap();
@@ -132,6 +137,29 @@ fn main() {
                 ],
             },
 
+            // 本振：缓存最后一次 SetMixer 的值，GetMixer 原样回读。
+            // （真固件是每次调 XRFdc_GetMixerSettings() 现读，见 rfdc.c；
+            //   dummy 没有硬件，只能这样模拟。）
+            SetMixer {
+                msg_id,
+                nports,
+                sync,
+                freq,
+                phase,
+            } => {
+                println!("SetMixer: nports={nports} sync={sync} freq={freq:?} phase={phase:?}");
+                mixer_freq.clone_from(&freq);
+                mixer_phase.clone_from(&phase);
+                SetMixerReply { msg_id }
+            }
+
+            GetMixer { msg_id } => GetMixerReply {
+                msg_id,
+                nports: mixer_freq.len() as u32,
+                freq: mixer_freq.clone(),
+                phase: mixer_phase.clone(),
+            },
+
             x => {
                 let desc = "invalid".to_string().as_bytes().to_vec();
                 InvalidMsg {
@@ -146,6 +174,8 @@ fn main() {
         let mut cursor = Cursor::new(Vec::new());
         reply.write(&mut cursor).unwrap();
         let buf = cursor.into_inner();
+        println!("sending {} Bytes to {addr}", buf.len());
+        print_bytes(&buf);
         socket.send_to(&buf, addr).unwrap();
     }
 }

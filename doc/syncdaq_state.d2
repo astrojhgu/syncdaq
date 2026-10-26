@@ -38,7 +38,7 @@ power_net.mac -> power_net.dhcp: "自动"
 power_net.dhcp -> power_net.online: "拿到 IP"
 
 power_net.online -> sync_stream.synced: "Sync.yaml"
-sync_stream.synced -> sync_stream.lo: "MixerSet.yaml"
+sync_stream.synced -> sync_stream.lo: "SetMixer.yaml"
 sync_stream.lo -> sync_stream.xgbe: "XGbeCfgSingle ×8"
 sync_stream.xgbe -> sync_stream.ready: "SetDSA.yaml"
 
