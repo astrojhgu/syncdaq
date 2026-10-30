@@ -202,12 +202,14 @@ fn main() {
                 }
             }
 
-            // 一个动作：RstL 1 -> 0 -> 延时 1ms -> 1（QSFP28 MSA 要求 ≥1µs）。
-            // 主机不带参数，时序全在固件里。
-            QsfpReset { msg_id } => {
+            // 一个动作：RstL 拉低 hold_ms -> 拉高（QSFP28 MSA 只要求 ≥1µs）。
+            // hold_ms=0 取最小 1ms，上限 500ms：真固件的 handler 是持 cmd_mutex
+            // 跑的，睡多久两个网口的命令线程就堵多久。
+            QsfpReset { msg_id, hold_ms } => {
+                let hold_ms = if hold_ms == 0 { 1 } else { hold_ms.min(500) };
                 qsfp_restl = 0;
-                println!("QsfpReset: RstL={qsfp_restl} (0 = 复位中)，保持 1 ms");
-                std::thread::sleep(std::time::Duration::from_millis(1));
+                println!("QsfpReset: RstL={qsfp_restl} (0 = 复位中)，保持 {hold_ms} ms");
+                std::thread::sleep(std::time::Duration::from_millis(hold_ms as u64));
                 qsfp_restl = 1;
                 println!("QsfpReset: RstL={qsfp_restl} (1 = 已释放)");
                 QsfpResetReply { msg_id }

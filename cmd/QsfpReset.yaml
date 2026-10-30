@@ -1,4 +1,7 @@
 - !QsfpReset
   msg_id: 0
-  # 复位 QSFP 光模块：固件执行单个动作 RstL 1->0->延时->1，主机不带参数。
-  # 复位后模块需要重新初始化，回读用 QsfpInfo.yaml 看 restl/modsell/lpmode。
+  # RstL 拉低时长（ms），必填。0 = 最小 1 ms；固件钳到 500 ms 上限：
+  # handler 持 cmd_mutex 跑，睡多久两个网口的命令线程就堵多久。
+  # QSFP28 MSA 只要求 ≥1 µs，10 ms 够用。
+  hold_ms: 10
+  # 复位后模块要重新初始化，回读用 QsfpInfo.yaml 看 restl/modsell/lpmode。

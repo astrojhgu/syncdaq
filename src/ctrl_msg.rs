@@ -354,12 +354,19 @@ pub enum CtrlMsg {
         adapt_eq: [u8; 4],
     },
     /// 复位 QSFP 光模块。语义是**一个动作**：固件读 GPO → 把 RstL(bit0) 拉低
-    /// → 自身固定延时（1 ms，QSFP28 MSA 只要求 ≥1 µs）→ 拉高 → 回包。
-    /// 主机不显式操作信号线，也不带保持时间参数（RstL 为低有效：
-    /// 1 = 正常工作、0 = 复位中）。
-    /// 线上布局：magic(4) + msg_id(4) = 8B。
+    /// `hold_ms` 毫秒 → 拉高 → 回包。主机不显式操作信号线，只给保持时间
+    /// （RstL 为低有效：1 = 正常工作、0 = 复位中）。
+    ///
+    /// `hold_ms = 0` 表示最小拉低时间 1 ms（QSFP28 MSA 只要求 ≥1 µs，1 ms 是
+    /// 固件能保证的最短脉冲；不是"不保持"）。固件侧把 `hold_ms` 钳到 500 ms
+    /// 上限：handler 是持 `cmd_mutex` 跑的，睡多久两个网口的命令线程就堵多久。
+    /// 线上布局：magic(4) + msg_id(4) + hold_ms(4) = 12B。
     #[brw(magic(0x00_00_10_03_u32))]
-    QsfpReset { msg_id: u32 },
+    QsfpReset {
+        msg_id: u32,
+        /// RstL 拉低的持续时间（ms）
+        hold_ms: u32,
+    },
     #[brw(magic(0xff_00_10_03_u32))]
     QsfpResetReply { msg_id: u32 },
     #[brw(magic(0x00_00_11_01_u32))]
@@ -942,8 +949,8 @@ impl Display for CtrlMsg {
                     adapt_eq[3],
                 )
             }
-            CtrlMsg::QsfpReset { msg_id } => {
-                writeln!(f, "QsfpReset{{msg_id:{msg_id}}}")
+            CtrlMsg::QsfpReset { msg_id, hold_ms } => {
+                writeln!(f, "QsfpReset{{msg_id:{msg_id}, hold_ms:{hold_ms}}}")
             }
             CtrlMsg::QsfpResetReply { msg_id } => {
                 writeln!(f, "QsfpResetReply{{msg_id:{msg_id}}}")
@@ -1663,16 +1670,21 @@ mod layout_tests {
         assert_eq!(&b[12..16], &1_u32.to_le_bytes(), "modsell@12");
     }
 
-    /// 锁定 QsfpReset / QsfpResetReply 的线上布局：两者都是 8B，只有 msg_id。
+    /// 锁定 QsfpReset / QsfpResetReply 的线上布局：
+    /// 请求 12B（magic + msg_id + hold_ms@8），回复 8B（magic + msg_id）。
     #[test]
     fn qsfp_reset_wire_layout() {
-        let req = CtrlMsg::QsfpReset { msg_id: 0x55 };
+        let req = CtrlMsg::QsfpReset {
+            msg_id: 0x55,
+            hold_ms: 10,
+        };
         let mut buf = Cursor::new(Vec::new());
         req.write(&mut buf).expect("write");
         let b = buf.into_inner();
-        assert_eq!(b.len(), 8, "QsfpReset 线上长度应为 8B");
+        assert_eq!(b.len(), 12, "QsfpReset 线上长度应为 12B");
         assert_eq!(&b[0..4], &0x00_00_10_03_u32.to_le_bytes(), "msg_type@0");
         assert_eq!(&b[4..8], &0x55_u32.to_le_bytes(), "msg_id@4");
+        assert_eq!(&b[8..12], &10_u32.to_le_bytes(), "hold_ms@8");
 
         let reply = CtrlMsg::QsfpResetReply { msg_id: 0x55 };
         let mut buf = Cursor::new(Vec::new());
