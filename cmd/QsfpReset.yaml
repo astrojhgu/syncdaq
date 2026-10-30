@@ -1,0 +1,4 @@
+- !QsfpReset
+  msg_id: 0
+  # 复位 QSFP 光模块：固件执行单个动作 RstL 1->0->延时->1，主机不带参数。
+  # 复位后模块需要重新初始化，回读用 QsfpInfo.yaml 看 restl/modsell/lpmode。

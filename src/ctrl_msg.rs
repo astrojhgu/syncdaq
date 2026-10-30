@@ -326,16 +326,23 @@ pub enum CtrlMsg {
         eq_ctrl: [i8; 4],
         adapt_eq: [u8; 4],
     },
+    /// QSFP 的 ModSelL / LPMode / CDR / 均衡设置。
+    ///
+    /// **不含 `restl`**：RstL 已剥离到 `QsfpReset`。固件 `qsfp_set_handler`
+    /// 必须改成 read-modify-write（读 GPO 寄存器 → 只改 bit1/bit2 → 写回），
+    /// 否则一次 QsfpSet 会把 bit0（RstL）连带清零、顺手把光模块复位掉。
     #[brw(magic(0x00_00_10_02_u32))]
     QsfpSet {
         msg_id: u32,
-        restl: u32,
         modsell: u32,
         lpmode: u32,
         cdr_ctrl: [u8; 4],
         eq_ctrl: [i8; 4],
         adapt_eq: [u8; 4],
     },
+    /// 回读三根控制引脚电平与模块当前设置。字段布局与 C 端
+    /// `struct QsfpSetReply` 一一对应，`restl` 仍在（回读值，不是入参）：
+    /// 写入后 RstL 应保持上一次 `QsfpReset` 释放后的高电平。
     #[brw(magic(0xff_00_10_02_u32))]
     QsfpSetReply {
         msg_id: u32,
@@ -346,6 +353,15 @@ pub enum CtrlMsg {
         eq_ctrl: [i8; 4],
         adapt_eq: [u8; 4],
     },
+    /// 复位 QSFP 光模块。语义是**一个动作**：固件读 GPO → 把 RstL(bit0) 拉低
+    /// → 自身固定延时（1 ms，QSFP28 MSA 只要求 ≥1 µs）→ 拉高 → 回包。
+    /// 主机不显式操作信号线，也不带保持时间参数（RstL 为低有效：
+    /// 1 = 正常工作、0 = 复位中）。
+    /// 线上布局：magic(4) + msg_id(4) = 8B。
+    #[brw(magic(0x00_00_10_03_u32))]
+    QsfpReset { msg_id: u32 },
+    #[brw(magic(0xff_00_10_03_u32))]
+    QsfpResetReply { msg_id: u32 },
     #[brw(magic(0x00_00_11_01_u32))]
     GtSet {
         msg_id: u32,
@@ -862,7 +878,6 @@ impl Display for CtrlMsg {
             }
             CtrlMsg::QsfpSet {
                 msg_id,
-                restl,
                 modsell,
                 lpmode,
                 cdr_ctrl,
@@ -873,7 +888,6 @@ impl Display for CtrlMsg {
                     f,
                     "QsfpSet{{
                     msg_id: {msg_id},
-                    restl: {restl},
                     modsell: {modsell},
                     lpmode: {lpmode},
                     cdr_ctrl: [{:x},{:x},{:x},{:x}],
@@ -905,7 +919,7 @@ impl Display for CtrlMsg {
             } => {
                 writeln!(
                     f,
-                    "QsfpSet{{
+                    "QsfpSetReply{{
                     msg_id: {msg_id},
                     restl: {restl},
                     modsell: {modsell},
@@ -927,6 +941,12 @@ impl Display for CtrlMsg {
                     adapt_eq[2],
                     adapt_eq[3],
                 )
+            }
+            CtrlMsg::QsfpReset { msg_id } => {
+                writeln!(f, "QsfpReset{{msg_id:{msg_id}}}")
+            }
+            CtrlMsg::QsfpResetReply { msg_id } => {
+                writeln!(f, "QsfpResetReply{{msg_id:{msg_id}}}")
             }
             CtrlMsg::GtSet {
                 msg_id,
@@ -1084,6 +1104,8 @@ impl CtrlMsg {
             QsfpInfoReply { msg_id, .. } => *msg_id = mid,
             QsfpSet { msg_id, .. } => *msg_id = mid,
             QsfpSetReply { msg_id, .. } => *msg_id = mid,
+            QsfpReset { msg_id, .. } => *msg_id = mid,
+            QsfpResetReply { msg_id, .. } => *msg_id = mid,
             GtSet { msg_id, .. } => *msg_id = mid,
             GtSetReply { msg_id, .. } => *msg_id = mid,
             FetchFW { msg_id, .. } => *msg_id = mid,
@@ -1153,6 +1175,8 @@ impl CtrlMsg {
             QsfpInfoReply { msg_id, .. } => *msg_id,
             QsfpSet { msg_id, .. } => *msg_id,
             QsfpSetReply { msg_id, .. } => *msg_id,
+            QsfpReset { msg_id, .. } => *msg_id,
+            QsfpResetReply { msg_id, .. } => *msg_id,
             GtSet { msg_id, .. } => *msg_id,
             GtSetReply { msg_id } => *msg_id,
             FetchFW { msg_id, .. } => *msg_id,
@@ -1593,5 +1617,68 @@ mod layout_tests {
         assert_eq!(&b[12..16], &0_u32.to_le_bytes(), "_pad@12 必须是 0");
         assert_eq!(&b[16..24], &257.0_f64.to_le_bytes(), "freq[0]@16");
         assert_eq!(&b[80..88], &1.5_f64.to_le_bytes(), "phase[0]@80");
+    }
+
+    /// 锁定 QsfpSet / QsfpSetReply 的线上布局（与 C 端 `struct QsfpSet` /
+    /// `struct QsfpSetReply` 一一对应）。
+    /// QsfpSet 剥离 `restl` 后是 28B：msg_id@4, modsell@8, lpmode@12,
+    /// cdr_ctrl@16, eq_ctrl@20, adapt_eq@24。
+    /// QsfpSetReply 仍回读 `restl`，是 32B：restl@8, modsell@12。
+    #[test]
+    fn qsfp_set_wire_layout() {
+        let req = CtrlMsg::QsfpSet {
+            msg_id: 0x1234,
+            modsell: 1,
+            lpmode: 0,
+            cdr_ctrl: [0xff, 0, 0, 0],
+            eq_ctrl: [5; 4],
+            adapt_eq: [1; 4],
+        };
+        let mut buf = Cursor::new(Vec::new());
+        req.write(&mut buf).expect("write");
+        let b = buf.into_inner();
+        assert_eq!(b.len(), 28, "QsfpSet 线上长度应为 28B（已去掉 restl）");
+        assert_eq!(&b[0..4], &0x00_00_10_02_u32.to_le_bytes(), "msg_type@0");
+        assert_eq!(&b[4..8], &0x1234_u32.to_le_bytes(), "msg_id@4");
+        assert_eq!(&b[8..12], &1_u32.to_le_bytes(), "modsell@8");
+        assert_eq!(&b[12..16], &0_u32.to_le_bytes(), "lpmode@12");
+        assert_eq!(&b[16..20], &[0xff, 0, 0, 0], "cdr_ctrl@16");
+        assert_eq!(&b[20..24], &[5_u8; 4], "eq_ctrl@20");
+
+        let reply = CtrlMsg::QsfpSetReply {
+            msg_id: 0x1234,
+            restl: 1,
+            modsell: 1,
+            lpmode: 0,
+            cdr_ctrl: [0xff, 0, 0, 0],
+            eq_ctrl: [5; 4],
+            adapt_eq: [1; 4],
+        };
+        let mut buf = Cursor::new(Vec::new());
+        reply.write(&mut buf).expect("write");
+        let b = buf.into_inner();
+        assert_eq!(b.len(), 32, "QsfpSetReply 线上长度应为 32B");
+        assert_eq!(&b[0..4], &0xff_00_10_02_u32.to_le_bytes(), "msg_type@0");
+        assert_eq!(&b[8..12], &1_u32.to_le_bytes(), "restl@8");
+        assert_eq!(&b[12..16], &1_u32.to_le_bytes(), "modsell@12");
+    }
+
+    /// 锁定 QsfpReset / QsfpResetReply 的线上布局：两者都是 8B，只有 msg_id。
+    #[test]
+    fn qsfp_reset_wire_layout() {
+        let req = CtrlMsg::QsfpReset { msg_id: 0x55 };
+        let mut buf = Cursor::new(Vec::new());
+        req.write(&mut buf).expect("write");
+        let b = buf.into_inner();
+        assert_eq!(b.len(), 8, "QsfpReset 线上长度应为 8B");
+        assert_eq!(&b[0..4], &0x00_00_10_03_u32.to_le_bytes(), "msg_type@0");
+        assert_eq!(&b[4..8], &0x55_u32.to_le_bytes(), "msg_id@4");
+
+        let reply = CtrlMsg::QsfpResetReply { msg_id: 0x55 };
+        let mut buf = Cursor::new(Vec::new());
+        reply.write(&mut buf).expect("write");
+        let b = buf.into_inner();
+        assert_eq!(b.len(), 8, "QsfpResetReply 线上长度应为 8B");
+        assert_eq!(&b[0..4], &0xff_00_10_03_u32.to_le_bytes(), "msg_type@0");
     }
 }
