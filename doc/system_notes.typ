@@ -142,6 +142,10 @@
   [`SetMixer`], [设本振 LO（`sync` 字段=1 表示等下一个 PPS 边沿再设）],
   [`GetMixer`], [读回 RFDC 内部当前本振（每通道 freq/phase）。每次调 `XRFdc_GetMixerSettings()` 现读，不缓存；上电未设过时是 IP 默认 NCO],
   [`SetDSA` / `GetDSA`], [设/查片上衰减（`dsa_value`，0=无衰减）],
+  [`QsfpInfo` / `QsfpSet`], [读/设光模块：`QsfpInfo` 回 96 B（温度、VCC、四路 TX 偏置 / RX / TX 光功率、LOS/LOL、`modpresent`、CDR / 均衡），`modpresent` 低有效（0=在位）；`QsfpSet` 只改 `ModSelL`/`LPMode`/CDR/均衡（28 B），*不含 `restl`*],
+  [`QsfpReset`], [复位光模块：单个动作 RstL 拉低 `hold_ms`→拉高（0=1 ms，>500 钳到 500），主机不操作信号线],
+  [`GetClk`], [读回时钟配置（`clk_src` / `pps_src` / `clk_state`），读 GPIO 与 `PPS_SEL` 寄存器的实际值，不缓存],
+  [`GetGt`], [读回四路 GT 的 pre/post-cursor 与 txdiff（20 B，与 `GtSet` 请求同构），读 PL 里 `XPAR_GT_*` 寄存器的实际值],
   [`init_rfsoc.yaml`], [一个文件包含一套初始化：`SetClk`+`Sync`+8×`XGbeCfgSingle`+`SetMixer`],
 )
 
@@ -166,7 +170,7 @@
   [开机 / 启动中], [上电], [FSBL → PL → PS，LMK/CMAC/RFDC 初始化],
   [MAC 已配置], [自动], [控制口 MAC 由 PL DNA 派生（失败用 fallback）],
   [等待 DHCP], [自动], [无地址时 UDP 服务不建 socket],
-  [在线], [拿到 IP], [UDP :3000 可收指令、可 `Query`（328 B 回包）],
+  [在线], [拿到 IP], [UDP :3000 可收指令、可 `Query`（336 B 回包）],
   [已同步], [`Sync.yaml`], [RFDC MTS 完成（前置 `SetClk` 选时钟/PPS 源）],
   [本振已设], [`SetMixer.yaml`], [各通道 LO 频率/相位],
   [100G 已配置], [`XGbeCfgSingle` ×8], [8 个端口的源/目的 MAC、IP、UDP 端口],

@@ -13,7 +13,7 @@
 | `boot` | 开机 / 启动中 | boot | FSBL → PL → PS，LMK/CMAC/RFDC 初始化 | 上电 |
 | `mac` | MAC 已配置 | boot | 控制口 MAC 由 PL DNA 派生（失败用 fallback） | 自动 |
 | `dhcp` | 等待 DHCP | net | `dhcp_start()`，无地址时 UDP 服务不建 socket | 自动 |
-| `online` | 在线 | net | 拿到 IP，UDP :3000 可收指令、可 `Query`（328 B 回包） | 拿到 IP |
+| `online` | 在线 | net | 拿到 IP，UDP :3000 可收指令、可 `Query`（336 B 回包） | 拿到 IP |
 | `synced` | 已同步 | cfg | RFDC MTS 完成（前置 `SetClk` 选时钟/PPS 源） | `Sync.yaml` |
 | `lo` | 本振已设 | cfg | 各通道 LO 频率/相位 | `SetMixer.yaml` |
 | `xgbe` | 100G 已配置 | cfg | 8 个端口的源/目的 MAC、IP、UDP 端口 | `XGbeCfgSingle` ×8 |
@@ -52,7 +52,7 @@ states:
   - {id: boot,   label: 开机 / 启动中,  kind: boot,   desc: "FSBL → PL → PS，LMK/CMAC/RFDC 初始化"}
   - {id: mac,    label: MAC 已配置,     kind: boot,   desc: "控制口 MAC 由 PL DNA 派生"}
   - {id: dhcp,   label: 等待 DHCP,      kind: net,    desc: "无地址时 UDP 服务不建 socket"}
-  - {id: online, label: 在线,           kind: net,    desc: "UDP :3000，Query 收 328 B"}
+  - {id: online, label: 在线,           kind: net,    desc: "UDP :3000，Query 收 336 B"}
   - {id: synced, label: 已同步,         kind: cfg,    desc: "RFDC MTS"}
   - {id: lo,     label: 本振已设,       kind: cfg,    desc: "LO 频率/相位"}
   - {id: xgbe,   label: 100G 已配置,    kind: cfg,    desc: "8 端口 MAC/IP/UDP 端口"}

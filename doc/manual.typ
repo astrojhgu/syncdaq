@@ -124,7 +124,7 @@ SyncDAQ 是一块*同步采集板*：8 路 I/Q ADC 经 RFDC 下变频，FPGA 侧
 - 通道号 = `port_id` = 目的端口 − 4000。
 - DHCP 服务可以是一台常驻服务器，也可以用 `./dhcp.sh` 临时起 `udhcpd`（池 `.100–.150`）。
 - 板卡地址不固定，*用广播探活*：`./target/release/bcast_cmd -a 192.168.5.255:3000 -c cmd/Query.yaml -d 1 -t 3`，
-  收到 *328 B* 回包即在线。
+  收到 *336 B* 回包即在线。
 
 // ---------------- 3 状态转移 ----------------
 = 状态转移
@@ -147,7 +147,7 @@ SyncDAQ 是一块*同步采集板*：8 路 I/Q ADC 经 RFDC 下变频，FPGA 侧
   [开机 / 启动中], [上电], [FSBL → PL → PS，LMK/CMAC/RFDC 初始化],
   [MAC 已配置], [自动], [控制口 MAC 由 PL DNA 派生（失败用 fallback）],
   [等待 DHCP], [自动], [无地址时 UDP 服务不建 socket],
-  [在线], [拿到 IP], [UDP :3000 可收指令、可 `Query`（328 B 回包）],
+  [在线], [拿到 IP], [UDP :3000 可收指令、可 `Query`（336 B 回包）],
   [已同步], [`Sync.yaml`], [RFDC MTS 完成（前置 `SetClk` 选时钟/PPS 源）],
   [本振已设], [`SetMixer.yaml`], [各通道 LO 频率/相位],
   [100G 已配置], [`XGbeCfgSingle` ×8], [8 个端口的源/目的 MAC、IP、UDP 端口],
@@ -194,14 +194,20 @@ SyncDAQ 是一块*同步采集板*：8 路 I/Q ADC 经 RFDC 下变频，FPGA 侧
   columns: (auto, auto, 1fr, auto),
   fill: cellfill,
   [指令], [YAML], [作用], [前置状态],
-  [`Query`], [`cmd/Query.yaml`], [查状态（328 B 回包：温度、`locked`、`smp_rate`、8 通道计数…）], [在线],
+  [`Query`], [`cmd/Query.yaml`], [查状态（336 B 回包：温度、`locked`、`smp_rate`、8 通道计数…）], [在线],
   [`XGbeCfgQuery`], [`cmd/XGbeCfgQuery.yaml`], [读 8 个 100G 端口的装订结果], [在线],
   [`SetClk`], [`cmd/gps.yaml` / `cmd/ext_clk.yaml`], [时钟 / PPS 源（`clk_src`：1=GPS，2=外部 10 MHz）], [在线],
+  [`GetClk`], [`cmd/GetClk.yaml`], [读回时钟配置（20 B 回包：`clk_src` / `pps_src` / `clk_state`）。读的是 PS GPIO pin33/34 电平与 `PPS_SEL` 寄存器的*实际值*，不缓存；上电后从未 `SetClk` 也能读], [在线],
   [`Sync`], [`cmd/Sync.yaml`], [RFDC MTS 同步，开机做一次], [停流],
   [`SetMixer`], [`cmd/SetMixer.yaml`], [设本振（`sync=1` 等 PPS 边沿）], [在线],
   [`GetMixer`], [`cmd/GetMixer.yaml`], [读回 RFDC 内部当前本振（`NPORTS` 个通道的 freq/phase）。固件每次都用 `XRFdc_GetMixerSettings()` 现读，*不缓存*，所以 MTS 重排相位／别处改过 NCO 后反映的是硬件真实值；上电未设过时是 IP 默认 NCO（320 工程实测 `-160.000000`，即 PL 里 `ADC_NCO_Freq=0.16 GHz` 取负）], [在线],
   [`XGbeCfgSingle`], [`cmd/XGbeCfgSingle.yaml`], [逐口装订 100G 源/目的 MAC、IP、端口], [停流],
   [`SetDSA`], [`cmd/SetDSA.yaml`], [设片上衰减；上电后必做], [在线],
+  [`GetDSA`], [`cmd/GetDSA.yaml`], [读片上衰减（单端口，`port_id` 指定）。注意回读值不等于实际衰减，见 §6.1 的说明], [在线],
+  [`QsfpInfo`], [`cmd/QsfpInfo.yaml`], [读光模块（96 B 回包：温度、VCC、四路 TX 偏置 / RX / TX 光功率、LOS/LOL、`modpresent`、CDR / 均衡设置）。`modpresent` 是 ModPrsL 电平（低有效：0=在位），主机打印成 `present` / `absent`], [在线],
+  [`QsfpSet`], [`cmd/QsfpSet.yaml`], [设 `ModSelL` / `LPMode` / CDR / 均衡（28 B 请求）。*不含* `restl`：RstL 由 `QsfpReset` 独占，固件用 read-modify-write 只改另外两位], [在线],
+  [`QsfpReset`], [`cmd/QsfpReset.yaml`], [复位光模块：单个动作，RstL 拉低 `hold_ms` 毫秒后拉高。`hold_ms` 必填，`0` = 最小 1 ms，超过 500 钳到 500（handler 持 `cmd_mutex`，睡多久两个网口的命令线程就堵多久）], [在线],
+  [`GetGt`], [`cmd/GetGt.yaml`], [读回四路 GT 的 pre-cursor / post-cursor / txdiff（20 B 回包，与 `GtSet` 请求体同构）。读的是 PL 里 `XPAR_GT_*` 三个寄存器的实际值，PL 重配 / 链路重训后读到的是复位值], [在线],
   [`StreamStart`], [`cmd/StreamStart.yaml`], [开始数据传输（PPS 对齐）], [就绪],
   [`StreamStop`], [`cmd/StreamStop.yaml`], [停止数据传输（PPS 对齐）], [传输中],
   [`QueryBitShift`], [`cmd/QueryBitShift.yaml`], [查 8bit 固件每通道取哪 8 位], [在线],
@@ -224,6 +230,9 @@ SyncDAQ 是一块*同步采集板*：8 路 I/Q ADC 经 RFDC 下变频，FPGA 侧
   [`SetDSA`], [3 ms], [1], [],
   [`QueryBitShift`], [0.3 ms], [1], [],
   [`QsfpInfo`], [407 ms], [1], [I²C 读光模块，普通指令里最慢],
+  [`QsfpSet`], [未单独测], [1], [写 I²C，与 `QsfpInfo` 同量级],
+  [`QsfpReset`], [`hold_ms` + 往返], [1], [实测 `hold_ms`=0/10/600 时 0.00 / 0.01 / 0.49 s（600 被钳到 500）],
+  [`GetClk` / `GetGt`], [< 10 ms], [1], [纯寄存器读，与 `Query` 同量级],
   [`StreamStart`], [11 ms], [1], [回包快；真正生效要等下一个 PPS],
   [`StreamStop`], [11 ms], [1], [同上],
   [`SetClk`], [31 ms], [1], [],
@@ -236,7 +245,7 @@ SyncDAQ 是一块*同步采集板*：8 路 I/Q ADC 经 RFDC 下变频，FPGA 侧
 )
 
 #tip[*口径*][
-  普通指令 `-t 1` 足够（最慢的 `QsfpInfo` 才 0.4 s）；
+  普通指令 `-t 1` 足够（最慢的 `QsfpInfo` 才 0.4 s；`QsfpReset` 最长 0.5 s，也在 1 s 内）；
   只有 *`SetMixer`（`sync=1`）和 `Sync` 实测约 1.4 s*，给 `-t 2` 留余量。
 ]
 
