@@ -31,6 +31,12 @@ fn main() {
     let mut clk_src: u32 = 0; // 0 = BUILTIN_10M
     let mut pps_src: u32 = 0; // 0 = GPS_PPS
 
+    // GT 均衡参数：真固件写/读 PL 的三个 AXI GPIO 寄存器（XPAR_GT_*_BASEADDR），
+    // 每路 5 bit；dummy 没有硬件，只能记住最后一次 GtSet 的入参。
+    let mut gt_precursor: [u8; 4] = [0; 4];
+    let mut gt_postcursor: [u8; 4] = [0; 4];
+    let mut gt_txdiff: [u8; 4] = [0; 4];
+
     // QSFP 控制引脚的 dummy 状态。真板卡这三根是 AXI IIC 的 GPO 寄存器
     // （XPAR_AXI_IIC_0_BASEADDR+0x124）的 bit0/1/2，分别驱动 RstL /
     // ModSelL / LPMode，低有效；这里存的就是引脚电平。
@@ -178,6 +184,30 @@ fn main() {
                 clk_src,
                 pps_src,
                 clk_state: 1,
+            },
+
+            // GT 均衡：真固件写/读 PL 的三个 AXI GPIO 寄存器（XPAR_GT_*_BASEADDR），
+            // 每路 5 bit 按 pack_gpio20 打包；dummy 直接存数组。
+            GtSet {
+                msg_id,
+                precursor,
+                postcursor,
+                txdiff,
+            } => {
+                println!(
+                    "GtSet: precursor={precursor:?} postcursor={postcursor:?} txdiff={txdiff:?}"
+                );
+                gt_precursor = precursor;
+                gt_postcursor = postcursor;
+                gt_txdiff = txdiff;
+                GtSetReply { msg_id }
+            }
+
+            GetGt { msg_id } => GetGtReply {
+                msg_id,
+                precursor: gt_precursor,
+                postcursor: gt_postcursor,
+                txdiff: gt_txdiff,
             },
 
             SetMixer {

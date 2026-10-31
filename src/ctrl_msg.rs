@@ -416,6 +416,23 @@ pub enum CtrlMsg {
     },
     #[brw(magic(0xff_00_11_01_u32))]
     GtSetReply { msg_id: u32 },
+    /// 读回四路 GT 的 pre-cursor / post-cursor / txdiff，与 `GtSet` 对仗。
+    /// 读的是 PL 里三个 AXI GPIO 寄存器（`XPAR_GT_*_BASEADDR`）的实际值：
+    /// 每路 5 bit，按固件 `pack_gpio20` 的顺序打包 —— lane0@[4:0]、
+    /// lane1@[9:5]、lane2@[14:10]、lane3@[19:15]。所以 PL 重配、链路重训
+    /// 把参数复位之后，这里读到的是复位值，不是最后一次 Set 的缓存。
+    /// 线上布局：magic(4) + msg_id(4) = 8B。
+    #[brw(magic(0x00_00_11_02_u32))]
+    GetGt { msg_id: u32 },
+    /// 20B：msg_id(4) + precursor[4] + postcursor[4] + txdiff[4]，
+    /// 与 `GtSet` 的请求体布局完全相同，只换 magic。
+    #[brw(magic(0xff_00_11_02_u32))]
+    GetGtReply {
+        msg_id: u32,
+        precursor: [u8; 4],
+        postcursor: [u8; 4],
+        txdiff: [u8; 4],
+    },
     #[brw(magic(0x00_00_20_01_u32))]
     FetchFW {
         msg_id: u32,
@@ -1039,6 +1056,25 @@ impl Display for CtrlMsg {
                     }}"
                 )
             }
+            CtrlMsg::GetGt { msg_id } => {
+                writeln!(f, "GetGt{{msg_id:{msg_id}}}")
+            }
+            CtrlMsg::GetGtReply {
+                msg_id,
+                precursor,
+                postcursor,
+                txdiff,
+            } => {
+                writeln!(
+                    f,
+                    "GetGtReply{{
+                    msg_id: {msg_id},
+                    precursor: {precursor:?},
+                    postcursor: {postcursor:?},
+                    txdiff: {txdiff:?},
+                    }}"
+                )
+            }
             CtrlMsg::FetchFW {
                 msg_id,
                 srv_ip,
@@ -1176,6 +1212,8 @@ impl CtrlMsg {
             QsfpResetReply { msg_id, .. } => *msg_id = mid,
             GtSet { msg_id, .. } => *msg_id = mid,
             GtSetReply { msg_id, .. } => *msg_id = mid,
+            GetGt { msg_id, .. } => *msg_id = mid,
+            GetGtReply { msg_id, .. } => *msg_id = mid,
             FetchFW { msg_id, .. } => *msg_id = mid,
             FetchFWReply { msg_id, .. } => *msg_id = mid,
             SwitchFW { msg_id, .. } => *msg_id = mid,
@@ -1249,6 +1287,8 @@ impl CtrlMsg {
             QsfpResetReply { msg_id, .. } => *msg_id,
             GtSet { msg_id, .. } => *msg_id,
             GtSetReply { msg_id } => *msg_id,
+            GetGt { msg_id } => *msg_id,
+            GetGtReply { msg_id, .. } => *msg_id,
             FetchFW { msg_id, .. } => *msg_id,
             FetchFWReply { msg_id, .. } => *msg_id,
             SwitchFW { msg_id, .. } => *msg_id,
@@ -1828,5 +1868,50 @@ mod layout_tests {
         assert_eq!(&b[8..12], &2_u32.to_le_bytes(), "clk_src@8");
         assert_eq!(&b[12..16], &1_u32.to_le_bytes(), "pps_src@12");
         assert_eq!(&b[16..20], &1_u32.to_le_bytes(), "clk_state@16");
+    }
+
+    /// 锁定 GetGt / GetGtReply 的线上布局（与 C 端 `struct GetGt` /
+    /// `struct GetGtReply` 一一对应）：请求 8B；回复 20B
+    /// （msg_type@0, msg_id@4, precursor@8, postcursor@12, txdiff@16）。
+    /// 回复体与 `GtSet` 的请求体同构，这里一并钉住 20B。
+    #[test]
+    fn get_gt_wire_layout() {
+        let req = CtrlMsg::GetGt { msg_id: 0x33 };
+        let mut buf = Cursor::new(Vec::new());
+        req.write(&mut buf).expect("write");
+        let b = buf.into_inner();
+        assert_eq!(b.len(), 8, "GetGt 线上长度应为 8B");
+        assert_eq!(&b[0..4], &0x00_00_11_02_u32.to_le_bytes(), "msg_type@0");
+        assert_eq!(&b[4..8], &0x33_u32.to_le_bytes(), "msg_id@4");
+
+        let reply = CtrlMsg::GetGtReply {
+            msg_id: 0x33,
+            precursor: [7, 6, 5, 4],
+            postcursor: [1, 2, 3, 4],
+            txdiff: [0, 31, 0, 0],
+        };
+        let mut buf = Cursor::new(Vec::new());
+        reply.write(&mut buf).expect("write");
+        let b = buf.into_inner();
+        assert_eq!(b.len(), 20, "GetGtReply 线上长度应为 20B");
+        assert_eq!(&b[0..4], &0xff_00_11_02_u32.to_le_bytes(), "msg_type@0");
+        assert_eq!(&b[4..8], &0x33_u32.to_le_bytes(), "msg_id@4");
+        assert_eq!(&b[8..12], &[7, 6, 5, 4], "precursor@8");
+        assert_eq!(&b[12..16], &[1, 2, 3, 4], "postcursor@12");
+        assert_eq!(&b[16..20], &[0, 31, 0, 0], "txdiff@16");
+
+        // GtSet 请求体与 GetGtReply 同构（只差 magic），同样是 20B
+        let set = CtrlMsg::GtSet {
+            msg_id: 0x33,
+            precursor: [7, 6, 5, 4],
+            postcursor: [1, 2, 3, 4],
+            txdiff: [0, 31, 0, 0],
+        };
+        let mut buf = Cursor::new(Vec::new());
+        set.write(&mut buf).expect("write");
+        let b = buf.into_inner();
+        assert_eq!(b.len(), 20, "GtSet 线上长度应为 20B");
+        assert_eq!(&b[0..4], &0x00_00_11_01_u32.to_le_bytes(), "msg_type@0");
+        assert_eq!(&b[8..12], &[7, 6, 5, 4], "precursor@8");
     }
 }

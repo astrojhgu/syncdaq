@@ -1,0 +1,5 @@
+- !GetGt
+  msg_id: 0
+  # 读回四路 GT 的 pre-cursor / post-cursor / txdiff（每路 5 bit，0..31）。
+  # 读的是 PL 里 XPAR_GT_*_BASEADDR 三个 AXI GPIO 寄存器的实际值，不缓存：
+  # PL 重配或链路重训把参数复位后，这里读到的是复位值。
