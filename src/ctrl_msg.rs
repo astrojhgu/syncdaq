@@ -71,6 +71,25 @@ fn boot_mode_name(m: u32) -> &'static str {
     }
 }
 
+/// `GetClkReply.clk_src`：固件 gpio.h 的 ClockSource 枚举。
+fn clk_src_name(s: u32) -> &'static str {
+    match s {
+        0 => "BUILTIN_10M",
+        1 => "GPS_10M",
+        2 => "EXT_10M",
+        _ => "INVALID",
+    }
+}
+
+/// `GetClkReply.pps_src`：固件 gpio.h 的 PpsSource 枚举。
+fn pps_src_name(s: u32) -> &'static str {
+    match s {
+        0 => "GPS_PPS",
+        1 => "EXT_PPS",
+        _ => "INVALID",
+    }
+}
+
 /// 解码 sw 版本位域（与 PL 版本同构：day@[31:27] month@[26:23] year@[22:17]
 /// hour@[16:12] minute@[11:6] second@[5:0]，year 为 2000 偏移），
 /// 其值是编译期 UTC 时间，转成本地时间显示。
@@ -262,6 +281,21 @@ pub enum CtrlMsg {
     },
     #[brw(magic(0xff_00_00_0c_u32))]
     SetClkReply { msg_id: u32, clk_state: u32 },
+    /// 读回当前时钟配置，与 `SetClk` 对称。读的是硬件实际值，不是软件缓存：
+    /// `clk_src` 来自 PS GPIO pin33/34 的当前电平组合（0=BUILTIN_10M、
+    /// 1=GPS_10M、2=EXT_10M），`pps_src` 来自 PPS_SEL 寄存器
+    /// （0=GPS_PPS、1=EXT_PPS），`clk_state` 是 LMK04828 的锁定状态
+    /// （与 `QueryReply.locked` 同源）。上电后从未 `SetClk` 过也能读。
+    /// 线上布局：magic(4) + msg_id(4) + clk_src(4) + pps_src(4) + clk_state(4) = 20B。
+    #[brw(magic(0x00_00_00_1c_u32))]
+    GetClk { msg_id: u32 },
+    #[brw(magic(0xff_00_00_1c_u32))]
+    GetClkReply {
+        msg_id: u32,
+        clk_src: u32,
+        pps_src: u32,
+        clk_state: u32,
+    },
     #[brw(magic(0x00_00_00_0d_u32))]
     SetMixer {
         msg_id: u32,
@@ -770,6 +804,27 @@ impl Display for CtrlMsg {
                     "SetClkReply {{msg_id: {msg_id}, clk_state: {clk_state}}}"
                 )
             }
+            CtrlMsg::GetClk { msg_id } => {
+                writeln!(f, "GetClk{{msg_id:{msg_id}}}")
+            }
+            CtrlMsg::GetClkReply {
+                msg_id,
+                clk_src,
+                pps_src,
+                clk_state,
+            } => {
+                writeln!(
+                    f,
+                    "GetClkReply{{
+                    msg_id: {msg_id},
+                    clk_src: {clk_src} ({}),
+                    pps_src: {pps_src} ({}),
+                    clk_state: {clk_state},
+                    }}",
+                    clk_src_name(*clk_src),
+                    pps_src_name(*pps_src),
+                )
+            }
             CtrlMsg::SetMixer {
                 msg_id,
                 nports: _,
@@ -1103,6 +1158,8 @@ impl CtrlMsg {
             XGbeCfgSingleReply { msg_id } => *msg_id = mid,
             SetClk { msg_id, .. } => *msg_id = mid,
             SetClkReply { msg_id, .. } => *msg_id = mid,
+            GetClk { msg_id, .. } => *msg_id = mid,
+            GetClkReply { msg_id, .. } => *msg_id = mid,
             SetMixer { msg_id, .. } => *msg_id = mid,
             SetMixerReply { msg_id } => *msg_id = mid,
             GetMixer { msg_id } => *msg_id = mid,
@@ -1174,6 +1231,8 @@ impl CtrlMsg {
             XGbeCfgSingleReply { msg_id } => *msg_id,
             SetClk { msg_id, .. } => *msg_id,
             SetClkReply { msg_id, .. } => *msg_id,
+            GetClk { msg_id, .. } => *msg_id,
+            GetClkReply { msg_id, .. } => *msg_id,
             SetMixer { msg_id, .. } => *msg_id,
             SetMixerReply { msg_id } => *msg_id,
             GetMixer { msg_id } => *msg_id,
@@ -1739,5 +1798,35 @@ mod layout_tests {
         let b = buf.into_inner();
         assert_eq!(b.len(), 8, "QsfpResetReply 线上长度应为 8B");
         assert_eq!(&b[0..4], &0xff_00_10_03_u32.to_le_bytes(), "msg_type@0");
+    }
+
+    /// 锁定 GetClk / GetClkReply 的线上布局（与 C 端 `struct GetClk` /
+    /// `struct GetClkReply` 一一对应）：请求 8B；回复 20B
+    /// （msg_type@0, msg_id@4, clk_src@8, pps_src@12, clk_state@16）。
+    #[test]
+    fn get_clk_wire_layout() {
+        let req = CtrlMsg::GetClk { msg_id: 0x77 };
+        let mut buf = Cursor::new(Vec::new());
+        req.write(&mut buf).expect("write");
+        let b = buf.into_inner();
+        assert_eq!(b.len(), 8, "GetClk 线上长度应为 8B");
+        assert_eq!(&b[0..4], &0x00_00_00_1c_u32.to_le_bytes(), "msg_type@0");
+        assert_eq!(&b[4..8], &0x77_u32.to_le_bytes(), "msg_id@4");
+
+        let reply = CtrlMsg::GetClkReply {
+            msg_id: 0x77,
+            clk_src: 2,
+            pps_src: 1,
+            clk_state: 1,
+        };
+        let mut buf = Cursor::new(Vec::new());
+        reply.write(&mut buf).expect("write");
+        let b = buf.into_inner();
+        assert_eq!(b.len(), 20, "GetClkReply 线上长度应为 20B");
+        assert_eq!(&b[0..4], &0xff_00_00_1c_u32.to_le_bytes(), "msg_type@0");
+        assert_eq!(&b[4..8], &0x77_u32.to_le_bytes(), "msg_id@4");
+        assert_eq!(&b[8..12], &2_u32.to_le_bytes(), "clk_src@8");
+        assert_eq!(&b[12..16], &1_u32.to_le_bytes(), "pps_src@12");
+        assert_eq!(&b[16..20], &1_u32.to_le_bytes(), "clk_state@16");
     }
 }

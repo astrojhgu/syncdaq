@@ -25,6 +25,12 @@ fn main() {
     let mut mixer_freq: Vec<f64> = vec![0.0; 8];
     let mut mixer_phase: Vec<f64> = vec![0.0; 8];
 
+    // 时钟：真固件的 setclk_handler 写 PS GPIO pin33/34 与 PPS_SEL 寄存器，
+    // get_clk_handler 读的是这些硬件的实际值（不缓存）。dummy 没有硬件，
+    // 只能把最近一次 SetClk 的入参存下来当"当前值"。
+    let mut clk_src: u32 = 0; // 0 = BUILTIN_10M
+    let mut pps_src: u32 = 0; // 0 = GPS_PPS
+
     // QSFP 控制引脚的 dummy 状态。真板卡这三根是 AXI IIC 的 GPO 寄存器
     // （XPAR_AXI_IIC_0_BASEADDR+0x124）的 bit0/1/2，分别驱动 RstL /
     // ModSelL / LPMode，低有效；这里存的就是引脚电平。
@@ -151,6 +157,29 @@ fn main() {
             // 本振：缓存最后一次 SetMixer 的值，GetMixer 原样回读。
             // （真固件是每次调 XRFdc_GetMixerSettings() 现读，见 rfdc.c；
             //   dummy 没有硬件，只能这样模拟。）
+            // 时钟：只记下 SetClk 的入参，GetClk 原样回读（真固件读 GPIO 与
+            // PPS_SEL 寄存器的实际值，见 gpio.c 的 set_clk_sel / set_pps_sel）。
+            SetClk {
+                msg_id,
+                clk_src: cs,
+                pps_src: ps,
+            } => {
+                println!("SetClk: clk_src={cs} pps_src={ps}");
+                clk_src = cs;
+                pps_src = ps;
+                SetClkReply {
+                    msg_id,
+                    clk_state: 1, // dummy 假装 LMK04828 已锁定
+                }
+            }
+
+            GetClk { msg_id } => GetClkReply {
+                msg_id,
+                clk_src,
+                pps_src,
+                clk_state: 1,
+            },
+
             SetMixer {
                 msg_id,
                 nports,

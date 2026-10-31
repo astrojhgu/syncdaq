@@ -1,0 +1,6 @@
+- !GetClk
+  msg_id: 0
+  # 读回当前时钟配置（硬件实际值，不是缓存）：
+  #   clk_src == 0 BUILTIN_10M / 1 GPS_10M / 2 EXT_10M（PS GPIO pin33/34 电平）
+  #   pps_src == 0 GPS_PPS / 1 EXT_PPS（PPS_SEL 寄存器）
+  #   clk_state == LMK04828 锁定状态（与 QueryReply.locked 同源）
