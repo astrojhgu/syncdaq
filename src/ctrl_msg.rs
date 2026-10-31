@@ -308,10 +308,14 @@ pub enum CtrlMsg {
     SetDSAReply { msg_id: u32 },
     #[brw(magic(0x00_00_10_01_u32))]
     QsfpInfo { msg_id: u32 },
+    /// 回读 QSFP 光模块状态。`restl` 已删除：RstL 电平归 `QsfpReset` 独占，
+    /// 在这里回读没有意义（`QsfpSetReply` 的 `restl` 是另一回事，那是写完后
+    /// 三根控制位的整体回显）。`modpresent` 是 ModPrsL 引脚电平，低有效：
+    /// 0 = 模块在位（插入后引脚被拉低），1 = 不在位。
+    /// 线上布局 96B（比旧版少 4B，删掉的就是 `restl`）。
     #[brw(magic(0xff_00_10_01_u32))]
     QsfpInfoReply {
         msg_id: u32,
-        restl: u32,
         modsell: u32,
         lpmode: u32,
         modpresent: u32,
@@ -829,7 +833,6 @@ impl Display for CtrlMsg {
             }
             CtrlMsg::QsfpInfoReply {
                 msg_id,
-                restl,
                 modsell,
                 lpmode,
                 modpresent,
@@ -857,10 +860,9 @@ impl Display for CtrlMsg {
                     lol: {},
                     l_temp_alarm:{},
                     l_vcc_alarm:{},
-                    restl:{restl},
                     modsell:{modsell},
                     lpmode:{lpmode},
-                    modpresent:{modpresent},
+                    modpresent:{},
                     cdr_ctrl: [{:x}, {:x}, {:x}, {:x}],
                     eq_ctrl: [{:x}, {:x}, {:x}, {:x}],
                     adapt_ctrl: [{:x}, {:x}, {:x}, {:x}],
@@ -869,6 +871,8 @@ impl Display for CtrlMsg {
                     bits_to_string(los_lol[2]),
                     bits_to_string(vcc_temp_alarm[1]),
                     bits_to_string(vcc_temp_alarm[3]),
+                    // ModPrsL 低有效：插上模块后引脚被拉低 -> 0 = 在位
+                    if *modpresent == 0 { "present" } else { "absent" },
                     cdr_ctrl[0],
                     cdr_ctrl[1],
                     cdr_ctrl[2],
@@ -1624,6 +1628,49 @@ mod layout_tests {
         assert_eq!(&b[12..16], &0_u32.to_le_bytes(), "_pad@12 必须是 0");
         assert_eq!(&b[16..24], &257.0_f64.to_le_bytes(), "freq[0]@16");
         assert_eq!(&b[80..88], &1.5_f64.to_le_bytes(), "phase[0]@80");
+    }
+
+    /// 锁定 QsfpInfoReply 的线上布局（与 C 端 `struct QsfpInfoReply` 一一对应）：
+    /// 96B（删掉 `restl` 后比旧版少 4B）。字段顺序 modsell@8, lpmode@12,
+    /// modpresent@16, temperature@20, vcc@24, tx_bias@28, rx_power@44,
+    /// tx_power@60, los_lol@76, vcc_temp_alarm@80, cdr_ctrl@84, eq_ctrl@88,
+    /// adapt_eq@92。
+    #[test]
+    fn qsfp_info_reply_wire_layout() {
+        let reply = CtrlMsg::QsfpInfoReply {
+            msg_id: 0x9,
+            modsell: 1,
+            lpmode: 0,
+            modpresent: 0,
+            temperature: 40.0,
+            vcc: 3.3,
+            tx_bias: [1.0; 4],
+            rx_power: [2.0; 4],
+            tx_power: [3.0; 4],
+            los_lol: [0xaa, 0, 0xbb, 0],
+            vcc_temp_alarm: [0, 0xcc, 0, 0xdd],
+            cdr_ctrl: [0xff, 0, 0, 0],
+            eq_ctrl: [5; 4],
+            adapt_eq: [1; 4],
+        };
+        let mut buf = Cursor::new(Vec::new());
+        reply.write(&mut buf).expect("write");
+        let b = buf.into_inner();
+        assert_eq!(b.len(), 96, "QsfpInfoReply 线上长度应为 96B（已去掉 restl）");
+        assert_eq!(&b[0..4], &0xff_00_10_01_u32.to_le_bytes(), "msg_type@0");
+        assert_eq!(&b[4..8], &0x9_u32.to_le_bytes(), "msg_id@4");
+        assert_eq!(&b[8..12], &1_u32.to_le_bytes(), "modsell@8");
+        assert_eq!(&b[12..16], &0_u32.to_le_bytes(), "lpmode@12");
+        assert_eq!(&b[16..20], &0_u32.to_le_bytes(), "modpresent@16");
+        assert_eq!(&b[20..24], &40.0_f32.to_le_bytes(), "temperature@20");
+        assert_eq!(&b[24..28], &3.3_f32.to_le_bytes(), "vcc@24");
+        assert_eq!(&b[28..32], &1.0_f32.to_le_bytes(), "tx_bias[0]@28");
+        assert_eq!(&b[44..48], &2.0_f32.to_le_bytes(), "rx_power[0]@44");
+        assert_eq!(&b[60..64], &3.0_f32.to_le_bytes(), "tx_power[0]@60");
+        assert_eq!(&b[76..80], &[0xaa, 0, 0xbb, 0], "los_lol@76");
+        assert_eq!(&b[80..84], &[0, 0xcc, 0, 0xdd], "vcc_temp_alarm@80");
+        assert_eq!(&b[84..88], &[0xff, 0, 0, 0], "cdr_ctrl@84");
+        assert_eq!(&b[88..92], &[5_u8; 4], "eq_ctrl@88");
     }
 
     /// 锁定 QsfpSet / QsfpSetReply 的线上布局（与 C 端 `struct QsfpSet` /

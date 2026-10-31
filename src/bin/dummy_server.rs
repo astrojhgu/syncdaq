@@ -215,10 +215,10 @@ fn main() {
                 QsfpResetReply { msg_id }
             }
 
-            // dummy 没有光模块，测量值给固定假数据；控制位与设置项回读状态。
+            // dummy 没有光模块，测量值给固定假数据；在位/控制位与设置项回读状态。
+            // 注意 ModPrsL 低有效：1 = absent，0 = present。dummy 没有模块，给 1。
             QsfpInfo { msg_id } => QsfpInfoReply {
                 msg_id,
-                restl: qsfp_restl,
                 modsell: qsfp_modsell,
                 lpmode: qsfp_lpmode,
                 modpresent: 1,
