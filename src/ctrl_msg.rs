@@ -433,6 +433,105 @@ pub enum CtrlMsg {
         postcursor: [u8; 4],
         txdiff: [u8; 4],
     },
+    /// 读 CMAC 的 statistics 寄存器，评估「主机 → 板卡」方向的链路质量。
+    ///
+    /// 数据源是 PL 里 CMAC US+ 的 Statistics/Counter 寄存器组（PG203 Table 36，
+    /// 工程配置 `INCLUDE_STATISTICS_COUNTERS=1`、4×25G、RS-FEC 开）。这套计数器是
+    /// 「Tick 快照 + 清零累加器」机制：固件**每次收到本命令都写一次
+    /// `TICK_REG(0x02B0)=1`**，所以返回的是「上次 GetCmacStat 至今」这个窗口内的
+    /// 累计值，读的同时累加器已清零。连续发两次，两次结果直接相减就是增量。
+    ///
+    /// 为什么能测空载链路：BIP / framing / FEC 码字这些在光口 up、没有业务流量时
+    /// 仍在持续计数（物理层一直有 idle 与 alignment marker），所以不灌流量也能评估。
+    ///
+    /// 布局与对齐：30 个 u64 计数器紧跟在 `msg_id` 之后（从偏移 8 起，天然 8 字节
+    /// 对齐），随后才是 8 个 u32 状态字。这样 C 端 struct 里**不需要任何显式 pad**，
+    /// 也不用 pack/aligned 属性，C 与 Rust 的 sizeof 一致。总长 280B。
+    #[brw(magic(0x00_00_12_01_u32))]
+    GetCmacStat { msg_id: u32 },
+    #[brw(magic(0xff_00_12_01_u32))]
+    GetCmacStatReply {
+        msg_id: u32,
+
+        // ---- 每 lane 的 BIP / framing（前 FEC 误码，最灵敏） ----
+        /// `STAT_RX_BIP_ERR_0..3`（`0x02C0 + n*8`，48-bit 补到 u64）：
+        /// 每 lane 的 BIP 错误数。这是 FEC **之前**的物理层误码，链路余量变化
+        /// 最先反映在这里。
+        bip_err: [u64; 4],
+        /// `STAT_RX_FRAMING_ERR_0..3`（`0x0360 + n*8`）：每 lane framing 错误数。
+        framing_err: [u64; 4],
+
+        // ---- RS-FEC（后 FEC 质量） ----
+        /// `STAT_RX_RSFEC_ERR_COUNT0..3_INC`（`0x101C/0x1024/0x102C/0x1034`）：
+        /// 每 lane 的 RS-FEC 符号错误数。
+        fec_err_cnt: [u64; 4],
+        /// `STAT_RX_RSFEC_CORRECTED_CW_INC`（`0x1008`）：被纠正的码字数。
+        fec_corrected_cw: u64,
+        /// `STAT_RX_RSFEC_UNCORRECTED_CW_INC`（`0x1010`）：纠正不了的码字数。
+        /// **非零就意味着丢包**，是最硬的坏消息。
+        fec_uncorrected_cw: u64,
+        /// `STAT_RX_RSFEC_CW_INC`（`0x103C`）：收到的总码字数，做分母算码字错误率。
+        fec_total_cw: u64,
+
+        // ---- MAC 层 RX 帧统计（端到端，需要有点流量才动） ----
+        /// `STAT_RX_TOTAL_PACKETS`（`0x0608`）
+        rx_total_packets: u64,
+        /// `STAT_RX_TOTAL_GOOD_PACKETS`（`0x0610`）
+        rx_good_packets: u64,
+        /// `STAT_RX_BAD_FCS`（`0x06C0`）：FCS 错帧数，端到端最终判据。
+        rx_bad_fcs: u64,
+        /// `STAT_RX_STOMPED_FCS`（`0x06D0`）：FCS 被覆盖，通常意味着多帧重叠/上游时序问题。
+        rx_stomped_fcs: u64,
+        /// `STAT_RX_UNDERSIZE`（`0x0698`）：短于最小帧长的合法 FCS 帧。
+        rx_undersize: u64,
+        /// `STAT_RX_OVERSIZE`（`0x06A8`）：长于 max packet len 且 FCS 正确的帧。
+        rx_oversize: u64,
+        /// `STAT_RX_TRUNCATED`（`0x0710`）：被截断的帧。
+        rx_truncated: u64,
+        /// `STAT_RX_JABBER`（`0x06B8`）：超长且 FCS 错的帧。
+        rx_jabber: u64,
+        /// `STAT_RX_BROADCAST/UNICAST/MULTICAST`（`0x06D8/0x06E0/0x06E8`）
+        rx_broadcast: u64,
+        rx_unicast: u64,
+        rx_multicast: u64,
+
+        // ---- TX 方向对照（区分「板子没发」和「链路丢了」） ----
+        /// `STAT_TX_TOTAL_PACKETS`（`0x0500`）：板子发出的帧数。
+        tx_total_packets: u64,
+        /// `STAT_TX_BAD_FCS`（`0x05B8`）：板子发出的 FCS 错帧（正常应恒为 0）。
+        tx_bad_fcs: u64,
+        /// `STAT_TX_FRAME_ERROR`（`0x0458`）：TX 帧错误。
+        tx_frame_error: u64,
+
+        // ---- 时间基准 ----
+        /// `STAT_CYCLE_COUNT`（`0x02B8`）：本窗口内的 CMAC **core clock** 周期数。
+        /// 实测 ≈322.6 MHz（= 103.125 Gbps / 320 bit 数据通路），并不是 PG203
+        /// 字面写的 SERDES clock —— 用 320 固件实测：窗口内 RS-FEC 码字数 /
+        /// cycle_count 与理论 19.53M codeword/s 吻合到 0.4% 以内。有它才能把
+        /// 错误数换算成速率（如 BIP 错误/秒、码字错误率/秒）。
+        cycle_count: u64,
+
+        // ---- 链路状态位（u32，放最后保证上面的 u64 自然对齐） ----
+        /// `STAT_RX_STATUS_REG`（`0x0204`）原始值。常用位：
+        /// bit0 `rx_status`、bit1 `aligned`、bit2 `misaligned`、bit3 `aligned_err`、
+        /// bit4 `hi_ber`、bit5 `remote_fault`、bit6 `local_fault`。
+        /// 注意 bit2/3/4 是 R/LH（读清）：读后仍为 1 表示错误正在持续。
+        rx_status: u32,
+        /// `STAT_RX_BLOCK_LOCK_REG`（`0x020C`）低 4 位：每 lane block lock。
+        block_lock: u32,
+        /// `STAT_RX_LANE_SYNC_REG`（`0x0210`）低 4 位：每 lane PCS 同步。
+        lane_sync: u32,
+        /// `STAT_RX_LANE_SYNC_ERR_REG`（`0x0214`）低 4 位：每 lane 同步丢失（R/LH）。
+        lane_sync_err: u32,
+        /// `STAT_RX_AM_ERR_REG`（`0x0218`）低 4 位：alignment marker 错误（R/LH）。
+        am_err: u32,
+        /// `STAT_RX_AM_LEN_ERR_REG`（`0x021C`）低 4 位：AM 长度错（R/LH）。
+        am_len_err: u32,
+        /// `STAT_RX_AM_REPEAT_ERR_REG`（`0x0220`）低 4 位：AM 重复错（R/LH）。
+        am_repeat_err: u32,
+        /// `STAT_RSFEC_STATUS_REG`（`0x1004`）：RS-FEC 状态（hi_ser 等）。
+        rsfec_status: u32,
+    },
     #[brw(magic(0x00_00_20_01_u32))]
     FetchFW {
         msg_id: u32,
@@ -1075,6 +1174,68 @@ impl Display for CtrlMsg {
                     }}"
                 )
             }
+            CtrlMsg::GetCmacStat { msg_id } => {
+                writeln!(f, "GetCmacStat{{msg_id:{msg_id}}}")
+            }
+            CtrlMsg::GetCmacStatReply {
+                msg_id,
+                bip_err,
+                framing_err,
+                fec_err_cnt,
+                fec_corrected_cw,
+                fec_uncorrected_cw,
+                fec_total_cw,
+                rx_total_packets,
+                rx_good_packets,
+                rx_bad_fcs,
+                rx_stomped_fcs,
+                rx_undersize,
+                rx_oversize,
+                rx_truncated,
+                rx_jabber,
+                rx_broadcast,
+                rx_unicast,
+                rx_multicast,
+                tx_total_packets,
+                tx_bad_fcs,
+                tx_frame_error,
+                cycle_count,
+                rx_status,
+                block_lock,
+                lane_sync,
+                lane_sync_err,
+                am_err,
+                am_len_err,
+                am_repeat_err,
+                rsfec_status,
+            } => {
+                let bip_sum: u64 = bip_err.iter().copied().sum();
+                let aligned = (*rx_status >> 1) & 1;
+                // 码字错误率：FEC 纠正的码字数 / 收到的总码字数
+                let cw_err_rate = if *fec_total_cw > 0 {
+                    *fec_corrected_cw as f64 / *fec_total_cw as f64
+                } else {
+                    0.0
+                };
+                writeln!(
+                    f,
+                    "GetCmacStatReply{{
+                    msg_id: {msg_id},
+                    link: aligned={aligned} block_lock={block_lock:#06x} lane_sync={lane_sync:#06x}
+                    err_latched: sync_err={lane_sync_err:#06x} am_err={am_err:#06x} am_len_err={am_len_err:#06x} am_repeat_err={am_repeat_err:#06x}
+                    status: rx_status={rx_status:#010x} rsfec_status={rsfec_status:#010x}
+                    bip_err: {bip_err:?} (sum {bip_sum})
+                    framing_err: {framing_err:?}
+                    fec: corrected_cw={fec_corrected_cw} uncorrected_cw={fec_uncorrected_cw} total_cw={fec_total_cw} cw_err_rate={cw_err_rate:.3e}
+                    fec_err_cnt: {fec_err_cnt:?}
+                    rx_frames: total={rx_total_packets} good={rx_good_packets} bad_fcs={rx_bad_fcs} stomped={rx_stomped_fcs}
+                    rx_bad_len: under={rx_undersize} over={rx_oversize} trunc={rx_truncated} jabber={rx_jabber}
+                    rx_cast: bcast={rx_broadcast} ucast={rx_unicast} mcast={rx_multicast}
+                    tx_frames: total={tx_total_packets} bad_fcs={tx_bad_fcs} frame_err={tx_frame_error}
+                    cycle_count: {cycle_count}
+                    }}"
+                )
+            }
             CtrlMsg::FetchFW {
                 msg_id,
                 srv_ip,
@@ -1214,6 +1375,8 @@ impl CtrlMsg {
             GtSetReply { msg_id, .. } => *msg_id = mid,
             GetGt { msg_id, .. } => *msg_id = mid,
             GetGtReply { msg_id, .. } => *msg_id = mid,
+            GetCmacStat { msg_id, .. } => *msg_id = mid,
+            GetCmacStatReply { msg_id, .. } => *msg_id = mid,
             FetchFW { msg_id, .. } => *msg_id = mid,
             FetchFWReply { msg_id, .. } => *msg_id = mid,
             SwitchFW { msg_id, .. } => *msg_id = mid,
@@ -1289,6 +1452,8 @@ impl CtrlMsg {
             GtSetReply { msg_id } => *msg_id,
             GetGt { msg_id } => *msg_id,
             GetGtReply { msg_id, .. } => *msg_id,
+            GetCmacStat { msg_id, .. } => *msg_id,
+            GetCmacStatReply { msg_id, .. } => *msg_id,
             FetchFW { msg_id, .. } => *msg_id,
             FetchFWReply { msg_id, .. } => *msg_id,
             SwitchFW { msg_id, .. } => *msg_id,
@@ -1913,5 +2078,92 @@ mod layout_tests {
         assert_eq!(b.len(), 20, "GtSet 线上长度应为 20B");
         assert_eq!(&b[0..4], &0x00_00_11_01_u32.to_le_bytes(), "msg_type@0");
         assert_eq!(&b[8..12], &[7, 6, 5, 4], "precursor@8");
+    }
+
+    /// 锁定 GetCmacStat / GetCmacStatReply 的线上布局（与 C 端
+    /// `struct GetCmacStatReply` 一一对应）：请求 8B；回复 **280B**
+    /// = 4(msg_type) + 4(msg_id) + 30×8(u64 计数器) + 8×4(u32 状态字)。
+    ///
+    /// 这个测试的重点是**对齐**：u64 从偏移 8 起、30 个连排到 248 结束，
+    /// 之后才是 u32。C 端 struct 因此不需要任何 pad 字段或对齐属性，
+    /// 也不会被编译器插填充 —— 这里逐段验证偏移。
+    #[test]
+    fn get_cmac_stat_wire_layout() {
+        let req = CtrlMsg::GetCmacStat { msg_id: 0x42 };
+        let mut buf = Cursor::new(Vec::new());
+        req.write(&mut buf).expect("write");
+        let b = buf.into_inner();
+        assert_eq!(b.len(), 8, "GetCmacStat 线上长度应为 8B");
+        assert_eq!(&b[0..4], &0x00_00_12_01_u32.to_le_bytes(), "msg_type@0");
+
+        let reply = CtrlMsg::GetCmacStatReply {
+            msg_id: 0x42,
+            bip_err: [1, 2, 3, 4],
+            framing_err: [5, 6, 7, 8],
+            fec_err_cnt: [9, 10, 11, 12],
+            fec_corrected_cw: 0x1111,
+            fec_uncorrected_cw: 0x2222,
+            fec_total_cw: 0x3333,
+            rx_total_packets: 0x4444,
+            rx_good_packets: 0x5555,
+            rx_bad_fcs: 0x6666,
+            rx_stomped_fcs: 0x7777,
+            rx_undersize: 0x8888,
+            rx_oversize: 0x9999,
+            rx_truncated: 0xaaaa,
+            rx_jabber: 0xbbbb,
+            rx_broadcast: 0xcccc,
+            rx_unicast: 0xdddd,
+            rx_multicast: 0xeeee,
+            tx_total_packets: 0x1_1111,
+            tx_bad_fcs: 0x2_2222,
+            tx_frame_error: 0x3_3333,
+            cycle_count: 0x4_4444,
+            rx_status: 0x0000_0002, // bit1 = aligned
+            block_lock: 0xf,
+            lane_sync: 0xf,
+            lane_sync_err: 0,
+            am_err: 0,
+            am_len_err: 0,
+            am_repeat_err: 0,
+            rsfec_status: 0,
+        };
+        let mut buf = Cursor::new(Vec::new());
+        reply.write(&mut buf).expect("write");
+        let b = buf.into_inner();
+        assert_eq!(b.len(), 280, "GetCmacStatReply 线上长度应为 280B");
+        assert_eq!(&b[0..4], &0xff_00_12_01_u32.to_le_bytes(), "msg_type@0");
+        assert_eq!(&b[4..8], &0x42_u32.to_le_bytes(), "msg_id@4");
+        // u64 区：偏移 8 起，每 8 字节一个
+        assert_eq!(&b[8..16], &1_u64.to_le_bytes(), "bip_err[0]@8");
+        assert_eq!(&b[16..24], &2_u64.to_le_bytes(), "bip_err[1]@16");
+        assert_eq!(&b[40..48], &5_u64.to_le_bytes(), "framing_err[0]@40");
+        assert_eq!(&b[72..80], &9_u64.to_le_bytes(), "fec_err_cnt[0]@72");
+        assert_eq!(
+            &b[104..112],
+            &0x1111_u64.to_le_bytes(),
+            "fec_corrected_cw@104"
+        );
+        assert_eq!(
+            &b[112..120],
+            &0x2222_u64.to_le_bytes(),
+            "fec_uncorrected_cw@112"
+        );
+        assert_eq!(
+            &b[128..136],
+            &0x4444_u64.to_le_bytes(),
+            "rx_total_packets@128"
+        );
+        assert_eq!(
+            &b[216..224],
+            &0x1_1111_u64.to_le_bytes(),
+            "tx_total_packets@216"
+        );
+        assert_eq!(&b[240..248], &0x4_4444_u64.to_le_bytes(), "cycle_count@240");
+        // u32 区：偏移 248 起
+        assert_eq!(&b[248..252], &2_u32.to_le_bytes(), "rx_status@248");
+        assert_eq!(&b[252..256], &0xf_u32.to_le_bytes(), "block_lock@252");
+        assert_eq!(&b[256..260], &0xf_u32.to_le_bytes(), "lane_sync@256");
+        assert_eq!(&b[276..280], &0_u32.to_le_bytes(), "rsfec_status@276");
     }
 }

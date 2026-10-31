@@ -1,0 +1,7 @@
+- !GetCmacStat
+  msg_id: 0
+  # 读 CMAC statistics 寄存器（PG203 Table 36），评估「主机 → 板卡」链路质量。
+  # 固件每次收到本命令都会写 TICK_REG(0x02B0)=1 触发快照并清零累加器，
+  # 所以返回的是「上次 GetCmacStat 至今」这个窗口内的计数。
+  # 连发两次、两次结果相减 = 增量；用例循环里当心率用最稳。
+  # 空载也能测：BIP / framing / RS-FEC 码字在光口 up 无业务流量时仍在计数。

@@ -210,6 +210,43 @@ fn main() {
                 txdiff: gt_txdiff,
             },
 
+            // CMAC 统计：dummy 没有 CMAC，只能给一组「链路健康、无计数」的静态值。
+            // 计数器全 0 是刻意的 —— 真板卡上这些值要么在动（BIP/FEC），要么全 0
+            // （链路干净），拿这个回复可以验证主机的解析与打印，但不能当链路证据。
+            GetCmacStat { msg_id } => GetCmacStatReply {
+                msg_id,
+                bip_err: [0; 4],
+                framing_err: [0; 4],
+                fec_err_cnt: [0; 4],
+                fec_corrected_cw: 0,
+                fec_uncorrected_cw: 0,
+                fec_total_cw: 0,
+                rx_total_packets: 0,
+                rx_good_packets: 0,
+                rx_bad_fcs: 0,
+                rx_stomped_fcs: 0,
+                rx_undersize: 0,
+                rx_oversize: 0,
+                rx_truncated: 0,
+                rx_jabber: 0,
+                rx_broadcast: 0,
+                rx_unicast: 0,
+                rx_multicast: 0,
+                tx_total_packets: 0,
+                tx_bad_fcs: 0,
+                tx_frame_error: 0,
+                cycle_count: 0,
+                // bit0 status + bit1 aligned，4 lane 全 block lock / lane sync
+                rx_status: 0x3,
+                block_lock: 0xf,
+                lane_sync: 0xf,
+                lane_sync_err: 0,
+                am_err: 0,
+                am_len_err: 0,
+                am_repeat_err: 0,
+                rsfec_status: 0,
+            },
+
             SetMixer {
                 msg_id,
                 nports,
